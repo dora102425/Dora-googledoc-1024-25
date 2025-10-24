@@ -60,9 +60,9 @@ def _build_gemini_parts(system_prompt: str, user_prompt_filled: str, images: Opt
 def run_gemini(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
     if not genai:
         raise RuntimeError("google-generativeai is not installed. Please add it to requirements.txt")
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("Missing GOOGLE_API_KEY. Please set it in your environment secrets.")
+        raise RuntimeError("Missing GEMINI_API_KEY. Please set it in your environment secrets.")
     
     genai.configure(api_key=api_key)
     
@@ -330,13 +330,13 @@ with st.sidebar:
     st.markdown("<div class='panel'>Set API keys in HF Secrets.</div>", unsafe_allow_html=True)
     st.write("API Key Status")
     c1, c2, c3 = st.columns(3)
-    c1.markdown(f"<span class='badge {'badge-ok' if os.getenv('GOOGLE_API_KEY') else 'badge-err'}'>Gemini</span>", unsafe_allow_html=True)
+    c1.markdown(f"<span class='badge {'badge-ok' if os.getenv('GEMINI_API_KEY') else 'badge-err'}'>Gemini</span>", unsafe_allow_html=True)
     c2.markdown(f"<span class='badge {'badge-ok' if os.getenv('OPENAI_API_KEY') else 'badge-err'}'>OpenAI</span>", unsafe_allow_html=True)
     c3.markdown(f"<span class='badge {'badge-ok' if os.getenv('XAI_API_KEY') else 'badge-err'}'>Grok</span>", unsafe_allow_html=True)
     st.divider()
 
     st.caption("Global Provider/Model Override")
-    ALL_MODELS = ["None", "gemini-1.5-flash", "gemini-1.5-pro", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "llama3-70b-8192", "llama3-8b-8192"]
+    ALL_MODELS = ["None", "gemini-1.5-flash", "gemini-2.5-flash-lite", "gpt-4o", "gpt-4o-mini", "gpt-4.1-mini", "grok-4-fast-reasoning", "grok-3-mini"]
     prov_choice = st.selectbox("Provider override", ["None", "gemini", "openai", "grok"])
     mod_choice = st.selectbox("Model override", ALL_MODELS)
     ss.global_provider_override = None if prov_choice == "None" else prov_choice
