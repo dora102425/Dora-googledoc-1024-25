@@ -40,7 +40,7 @@ class ProviderError(Exception):
 
 # --- Gemini Service ---
 def run_gemini(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
-    api_key = st.session_state.get("google_api_key")
+    api_key = st.session_state.get("GEMINI_API_KEY")
     if not api_key: raise ProviderError("Google API Key is not set. Please provide it in the sidebar.")
     if not genai: raise ProviderError("google-generativeai is not installed.")
     
@@ -184,7 +184,7 @@ def get_theme_css(theme_name):
     return f"""<style> .badge {{padding:2px 8px;border-radius:8px;font-size:12px;display:inline-block;margin-right:6px;}} .badge-ok {{background:#e6ffe6;color:#1a7f37;border:1px solid #1a7f37;}} .badge-err {{background:#ffe6e6;color:#a12622;border:1px solid #a12622;}} .status-dot {{height:10px;width:10px;border-radius:50%;display:inline-block;margin-right:6px;}} .dot-green {{background:#00c853;}} .dot-yellow {{background:#ffd600;}} .dot-red {{background:#d50000;}} .panel {{padding:10px 12px;border:1px solid #ccc;border-radius:8px;background:{sec_bg};}} .stApp {{background-color:{bg};}} h1,h2,h3,p,label,div[data-baseweb="tooltip"],div[data-testid="stMarkdownContainer"] p {{color:{text} !important;}} .stButton>button {{background-color:{primary};color:white !important;border:1px solid {primary};}} div[data-testid="stSidebarUserContent"] {{background-color:{sec_bg};}}</style>"""
 
 # --- State Init ---
-DEFAULT_AGENTS = yaml.safe_load("""- {name: Summarizer, provider: gemini, model: gemini-1.5-flash, temperature: 0.3, max_tokens: 1024, system_prompt: 'Summarize accurately.', user_prompt: 'Summarize in 3 bullets:\\n\\n{{input}}'}""")
+DEFAULT_AGENTS = yaml.safe_load("""- {name: Summarizer, provider: gemini, model: gemini-2.5-flash, temperature: 0.3, max_tokens: 1024, system_prompt: 'Summarize accurately.', user_prompt: 'Summarize in 3 bullets:\\n\\n{{input}}'}""")
 if "agents" not in ss: ss.agents = DEFAULT_AGENTS
 for key in ["dataset", "schema", "generated_docs", "pipeline_history", "images"]:
     if key not in ss: ss[key] = []
@@ -211,13 +211,13 @@ with st.sidebar:
                 st.rerun()
         return badge
     c1, c2, c3 = st.columns(3)
-    c1.markdown(api_key_manager("GOOGLE_API_KEY", "google_api_key", "Gemini"), unsafe_allow_html=True)
+    c1.markdown(api_key_manager("GEMINI_API_KEY", "GEMINI_API_KEY", "Gemini"), unsafe_allow_html=True)
     c2.markdown(api_key_manager("OPENAI_API_KEY", "openai_api_key", "OpenAI"), unsafe_allow_html=True)
     c3.markdown(api_key_manager("XAI_API_KEY", "xai_api_key", "Grok"), unsafe_allow_html=True)
     st.divider()
 
     st.caption("Global Overrides")
-    ALL_MODELS = ["None", "gemini-1.5-flash", "gemini-1.5-pro", "gpt-4o", "gpt-4o-mini", "llama3-70b-8192", "llama3-8b-8192"]
+    ALL_MODELS = ["None", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gpt-4o-mini", "gpt-4.1-mini", "grok-3-mini", "grok-4-fast-reasoning"]
     prov = st.selectbox("Provider override", ["None", "gemini", "openai", "grok"])
     mod = st.selectbox("Model override", ALL_MODELS)
     ss.global_provider_override = prov if prov != "None" else None
