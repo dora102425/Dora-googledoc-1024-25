@@ -174,7 +174,7 @@ def get_theme_css(theme_name):
     return f"""<style>.badge{{padding:2px 8px;border-radius:8px;font-size:12px;display:inline-block;margin-right:6px}}.badge-ok{{background:#e6ffe6;color:#1a7f37;border:1px solid #1a7f37}}.badge-err{{background:#ffe6e6;color:#a12622;border:1px solid #a12622}}.status-dot{{height:10px;width:10px;border-radius:50%;display:inline-block;margin-right:6px}}.dot-green{{background:#00c853}}.dot-yellow{{background:#ffd600}}.dot-red{{background:#d50000}}.panel{{padding:10px 12px;border:1px solid #ccc;border-radius:8px;background:{sbg}}}.stApp{{background-color:{bg}}}h1,h2,h3,p,label,div[data-baseweb="tooltip"],div[data-testid="stMarkdownContainer"] p{{color:{txt} !important}}.stButton>button{{background-color:{p};color:white !important;border:1px solid {p}}}div[data-testid="stSidebarUserContent"]{{background-color:{sbg}}}</style>"""
 
 # --- INIT STATE ---
-DEFAULT_AGENTS = [{"name":"Summarizer","provider":"gemini","model":"gemini-1.5-flash","temperature":0.3,"max_tokens":1024,"system_prompt":"Summarize accurately.","user_prompt":"Summarize in 3 bullets:\n\n{{input}}"}]
+DEFAULT_AGENTS = [{"name":"Summarizer","provider":"gemini","model":"gemini-2.5-flash","temperature":0.3,"max_tokens":1024,"system_prompt":"Summarize accurately.","user_prompt":"Summarize in 3 bullets:\n\n{{input}}"}]
 for k,v in {"dataset":[],"schema":[],"generated_docs":[],"pipeline_history":[],"images":[],"template_text":"", "is_running":False,"selected_theme":"Flora (Default)","pipeline_input":""}.items():
     if k not in ss: ss[k] = v
 if "agents" not in ss: ss.agents = DEFAULT_AGENTS
@@ -199,7 +199,7 @@ with st.sidebar:
     st.divider()
     ss.global_provider_override = st.selectbox("Provider Override", ["None","gemini","openai","grok"])
     if ss.global_provider_override == "None": ss.global_provider_override = None
-    ss.global_model_override = st.selectbox("Model Override", ["None","gemini-1.5-flash","gemini-1.5-pro","gpt-4o","gpt-4o-mini","llama3-70b-8192"])
+    ss.global_model_override = st.selectbox("Model Override", ["None","gemini-2.5-flash","gemini-2.5-flash-lite","gpt-4.1-mini","gpt-4o-mini","grok-3-mini"])
     if ss.global_model_override == "None": ss.global_model_override = None
     st.divider()
     yf = st.file_uploader("Load agents.yaml", type=["yaml","yml"])
@@ -246,7 +246,7 @@ with tab4:
             c1,c2,c3 = st.columns(3)
             a["name"] = c1.text_input("Name", a.get("name"), key=f"an{i}")
             a["provider"] = c2.selectbox("Provider", ["gemini","openai","grok"], ["gemini","openai","grok"].index(a.get("provider","gemini")), key=f"ap{i}")
-            a["model"] = c3.text_input("Model", a.get("model","gemini-1.5-flash"), key=f"am{i}")
+            a["model"] = c3.text_input("Model", a.get("model","gemini-2.5-flash"), key=f"am{i}")
             a["system_prompt"] = st.text_area("System Prompt", a.get("system_prompt",""), key=f"asp{i}", height=100)
             a["user_prompt"] = st.text_area("User Prompt", a.get("user_prompt","{{input}}"), key=f"aup{i}", height=150)
     if st.button("➕ Add Agent"): ss.agents.append(DEFAULT_AGENTS[0].copy()); st.rerun()
