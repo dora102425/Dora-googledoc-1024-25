@@ -1,0 +1,10 @@
+streamlit
+pandas
+openai
+google-generativeai
+xai_sdk
+Pillow
+mammoth
+python-docx
+PyYAML
+odfpy
