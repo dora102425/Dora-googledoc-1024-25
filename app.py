@@ -3,17 +3,240 @@ import io
 import time
 import json
 import zipfile
+import re
+import base64
 from typing import List, Dict, Any, Optional
 
+# External Libraries - Make sure these are in requirements.txt
 import streamlit as st
 import pandas as pd
 import yaml
+import mammoth
+from docx import Document
+from PIL import Image
 
-# Local Imports (will now work with the __init__.py files)
-from utils.parser import parse_dataset_file, parse_template_file, guess_schema_from_records
-from utils.template import render_template_on_record, render_template_on_dataset
-from utils.exporters import build_zip_from_docs, export_docx
-from services.model_router import run_agent_step, ProviderError
+# Try to import provider SDKs, handle gracefully if not installed
+try:
+    import google.generativeai as genai
+except ImportError:
+    genai = None
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+try:
+    from xai_sdk import Client
+    from xai_sdk.chat import user as grok_user, system as grok_system
+except ImportError:
+    Client = None
+    grok_user = None
+    grok_system = None
+
+
+# ==============================================================================
+# --- SERVICES (Originally in services/ folder) ---
+# ==============================================================================
+
+# --- Gemini Service ---
+def _build_gemini_parts(system_prompt: str, user_prompt_filled: str, images: Optional[List[Any]]):
+    parts = []
+    # Gemini API prefers system instructions to be part of the first user message
+    full_prompt = f"{system_prompt}\n\n{user_prompt_filled}"
+    parts.append(full_prompt)
+    
+    if images:
+        for f in images:
+            try:
+                # Reset buffer pointer if it has been read before
+                f.seek(0)
+                img_bytes = f.read()
+                img = Image.open(io.BytesIO(img_bytes))
+                parts.append(img)
+            except Exception:
+                # Silently ignore bad images
+                pass
+    return parts
+
+def run_gemini(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
+    if not genai:
+        raise RuntimeError("google-generativeai is not installed. Please add it to requirements.txt")
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing GOOGLE_API_KEY. Please set it in your environment secrets.")
+    
+    genai.configure(api_key=api_key)
+    
+    user_prompt_filled = user_prompt.replace("{{input}}", input_text)
+    m = genai.GenerativeModel(model)
+    parts = _build_gemini_parts(system_prompt, user_prompt_filled, images)
+
+    resp = m.generate_content(
+        parts,
+        generation_config={"temperature": temperature, "max_output_tokens": max_tokens}
+    )
+    return resp.text if hasattr(resp, "text") and resp.text else ""
+
+# --- OpenAI Service ---
+def _image_part(file) -> Optional[dict]:
+    try:
+        file.seek(0)
+        b = file.read()
+        b64 = base64.b64encode(b).decode("utf-8")
+        return {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+    except Exception:
+        return None
+
+def run_openai(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
+    if not OpenAI:
+        raise RuntimeError("openai is not installed. Please add it to requirements.txt")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing OPENAI_API_KEY. Please set it in your environment secrets.")
+    
+    client = OpenAI(api_key=api_key)
+    
+    content_items = [{"type": "text", "text": user_prompt.replace("{{input}}", input_text)}]
+    if images:
+        for f in images:
+            part = _image_part(f)
+            if part:
+                content_items.append(part)
+
+    msgs = []
+    if system_prompt:
+        msgs.append({"role": "system", "content": system_prompt})
+    msgs.append({"role": "user", "content": content_items})
+
+    completion = client.chat.completions.create(
+        model=model, messages=msgs, temperature=temperature, max_tokens=max_tokens
+    )
+    return completion.choices[0].message.content or ""
+
+# --- Grok Service ---
+def run_grok(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
+    if not Client:
+        raise RuntimeError("xai-sdk is not installed. Please add it to requirements.txt")
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing XAI_API_KEY. Please set it in your environment secrets.")
+    
+    client = Client(api_key=api_key)
+    chat = client.chat.create(model=model)
+    
+    if system_prompt:
+        chat.append(grok_system(system_prompt))
+    
+    chat.append(grok_user(user_prompt.replace("{{input}}", input_text)))
+    
+    response = chat.sample(max_len=max_tokens, temp=temperature)
+    return getattr(response, "content", "") or ""
+
+# --- Model Router ---
+class ProviderError(Exception):
+    pass
+
+def run_agent_step(provider: str, model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
+    try:
+        if provider == "gemini":
+            return run_gemini(model, system_prompt, user_prompt, input_text, temperature, max_tokens, images)
+        elif provider == "openai":
+            return run_openai(model, system_prompt, user_prompt, input_text, temperature, max_tokens, images)
+        elif provider == "grok":
+            if images:
+                st.warning("Grok provider does not support images in this implementation. Ignoring images.")
+            return run_grok(model, system_prompt, user_prompt, input_text, temperature, max_tokens, images)
+        else:
+            raise ProviderError(f"Unknown provider: {provider}")
+    except Exception as e:
+        # Catch-all for API errors, key issues, etc.
+        raise ProviderError(str(e))
+
+
+# ==============================================================================
+# --- UTILS (Originally in utils/ folder) ---
+# ==============================================================================
+
+# --- Parser Utils ---
+def parse_dataset_file(uploaded_file) -> List[Dict[str, Any]]:
+    name = uploaded_file.name.lower()
+    if name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    elif name.endswith(".json"):
+        data = json.load(uploaded_file)
+        if isinstance(data, list): return data
+        raise ValueError("JSON must be an array of records.")
+    elif name.endswith(".xlsx"):
+        df = pd.read_excel(uploaded_file)
+    elif name.endswith(".ods"):
+        df = pd.read_excel(uploaded_file, engine="odf")
+    elif name.endswith(".txt"):
+        lines = uploaded_file.getvalue().decode("utf-8", errors="ignore").splitlines()
+        return [{"text": line} for line in lines if line.strip()]
+    else:
+        raise ValueError("Unsupported file type.")
+    return df.fillna("").to_dict(orient="records")
+
+def parse_template_file(uploaded_file) -> str:
+    name = uploaded_file.name.lower()
+    if name.endswith((".txt", ".md")):
+        return uploaded_file.getvalue().decode("utf-8", errors="ignore")
+    elif name.endswith(".docx"):
+        result = mammoth.extract_raw_text(uploaded_file)
+        return result.value
+    raise ValueError("Unsupported template type. Use txt, md, or docx.")
+
+def guess_schema_from_records(records: List[Dict[str, Any]]) -> List[str]:
+    if not records: return []
+    cols = set()
+    for r in records[:50]:
+        cols.update(r.keys())
+    return sorted(list(cols))
+
+# --- Template Utils ---
+PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
+
+def render_template_on_record(template: str, record: Dict[str, Any]) -> str:
+    def repl(match):
+        key = match.group(1).strip()
+        return str(record.get(key, f"{{{{{key}}}}}"))
+    return PLACEHOLDER_RE.sub(repl, template)
+
+def render_template_on_dataset(dataset: List[Dict[str, Any]], template: str) -> List[Dict[str, str]]:
+    docs = []
+    for i, rec in enumerate(dataset, start=1):
+        content = render_template_on_record(template, rec)
+        filename = rec.get("filename") or rec.get("title") or f"doc_{i}.txt"
+        docs.append({"filename": str(filename), "content": content})
+    return docs
+
+# --- Exporter Utils ---
+def build_zip_from_docs(docs: List[Dict[str,str]], ext: str = "txt") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for i, d in enumerate(docs, start=1):
+            base, _ = os.path.splitext(d.get("filename") or f"doc_{i}")
+            filename = f"{base}.{ext}"
+            if ext == "docx":
+                doc_buf = export_docx(d.get("content", ""))
+                zf.writestr(filename, doc_buf.getvalue())
+            else:
+                zf.writestr(filename, d.get("content", ""))
+    buf.seek(0)
+    return buf.getvalue()
+
+def export_docx(text: str) -> io.BytesIO:
+    doc = Document()
+    for line in str(text).splitlines():
+        doc.add_paragraph(line)
+    dbuf = io.BytesIO()
+    doc.save(dbuf)
+    dbuf.seek(0)
+    return dbuf
+
+
+# ==============================================================================
+# --- STREAMLIT APP ---
+# ==============================================================================
 
 # -------------------------
 # App Config & UI Themes
@@ -25,28 +248,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# --- 20 "Wow" Themes ---
 THEMES = {
-    "Flora (Default)": ("#A55EEA", "#F0F2F6", "#E6E6FA", "#262730"),
-    "Ocean Breeze": ("#1E90FF", "#F0F8FF", "#D6EAF8", "#17202A"),
-    "Forest Whisper": ("#228B22", "#F0FFF0", "#D5F5E3", "#145A32"),
-    "Sunset Glow": ("#FF4500", "#FFF5EE", "#FADBD8", "#641E16"),
-    "Midnight Slate": ("#34495E", "#2C3E50", "#5D6D7E", "#ECF0F1"),
-    "Sunny Meadow": ("#FFD700", "#FFFFF0", "#FCF3CF", "#873600"),
-    "Lavender Dreams": ("#8A2BE2", "#F8F5FF", "#E8DAEF", "#300D4F"),
-    "Ruby Red": ("#C70039", "#FFF0F0", "#F5B7B1", "#581845"),
-    "Emerald Isle": ("#009B77", "#E8F8F5", "#A9DFBF", "#0E6655"),
-    "Golden Harvest": ("#DAA520", "#FFFAF0", "#FDEBD0", "#7E5109"),
-    "Arctic Ice": ("#5DADE2", "#EBF5FB", "#D4E6F1", "#154360"),
-    "Warm Earth": ("#A0522D", "#FFF8DC", "#F5DEB3", "#512E0C"),
-    "Cyberpunk Neon": ("#00FFFF", "#1B2631", "#283747", "#EAECEE"),
-    "Pastel Cloud": ("#FFB6C1", "#FFF9FA", "#FADADD", "#6C3483"),
-    "Volcanic Ash": ("#36454F", "#212F3D", "#2C3E50", "#FDFEFE"),
-    "Mint Fresh": ("#66CDAA", "#F0FFFA", "#D1F2EB", "#0B5345"),
-    "Berry Fusion": ("#8B0000", "#FAEBD7", "#F5CBA7", "#4A235A"),
-    "Grape Vine": ("#6A0DAD", "#F4ECF7", "#D7BDE2", "#2C1B4B"),
-    "Teal Focus": ("#008080", "#E0FFFF", "#B2DFDB", "#004D40"),
-    "Mustard Zing": ("#FFDB58", "#FFFACD", "#F9E79F", "#5C4033")
+    "Flora (Default)": ("#A55EEA", "#F0F2F6", "#E6E6FA", "#262730"), "Ocean Breeze": ("#1E90FF", "#F0F8FF", "#D6EAF8", "#17202A"),
+    "Forest Whisper": ("#228B22", "#F0FFF0", "#D5F5E3", "#145A32"), "Sunset Glow": ("#FF4500", "#FFF5EE", "#FADBD8", "#641E16"),
+    "Midnight Slate": ("#34495E", "#2C3E50", "#5D6D7E", "#ECF0F1"), "Sunny Meadow": ("#FFD700", "#FFFFF0", "#FCF3CF", "#873600"),
+    "Lavender Dreams": ("#8A2BE2", "#F8F5FF", "#E8DAEF", "#300D4F"), "Ruby Red": ("#C70039", "#FFF0F0", "#F5B7B1", "#581845"),
+    "Emerald Isle": ("#009B77", "#E8F8F5", "#A9DFBF", "#0E6655"), "Golden Harvest": ("#DAA520", "#FFFAF0", "#FDEBD0", "#7E5109"),
+    "Arctic Ice": ("#5DADE2", "#EBF5FB", "#D4E6F1", "#154360"), "Warm Earth": ("#A0522D", "#FFF8DC", "#F5DEB3", "#512E0C"),
+    "Cyberpunk Neon": ("#00FFFF", "#1B2631", "#283747", "#EAECEE"), "Pastel Cloud": ("#FFB6C1", "#FFF9FA", "#FADADD", "#6C3483"),
+    "Volcanic Ash": ("#36454F", "#212F3D", "#2C3E50", "#FDFEFE"), "Mint Fresh": ("#66CDAA", "#F0FFFA", "#D1F2EB", "#0B5345"),
+    "Berry Fusion": ("#8B0000", "#FAEBD7", "#F5CBA7", "#4A235A"), "Grape Vine": ("#6A0DAD", "#F4ECF7", "#D7BDE2", "#2C1B4B"),
+    "Teal Focus": ("#008080", "#E0FFFF", "#B2DFDB", "#004D40"), "Mustard Zing": ("#FFDB58", "#FFFACD", "#F9E79F", "#5C4033")
 }
 
 def get_theme_css(theme_name: str) -> str:
@@ -55,34 +267,16 @@ def get_theme_css(theme_name: str) -> str:
 <style>
 .badge {{padding: 2px 8px; border-radius: 8px; font-size: 12px; display: inline-block; margin-right: 6px;}}
 .badge-ok {{background: #e6ffe6; color: #1a7f37; border: 1px solid #1a7f37;}}
-.badge-warn {{background: #fffbe6; color: #8a6d3b; border: 1px solid #8a6d3b;}}
 .badge-err {{background: #ffe6e6; color: #a12622; border: 1px solid #a12622;}}
 .status-dot {{height:10px; width:10px; border-radius:50%; display:inline-block; margin-right:6px;}}
-.dot-green {{background:#00c853;}}
-.dot-yellow {{background:#ffd600;}}
-.dot-red {{background:#d50000;}}
+.dot-green {{background:#00c853;}} .dot-yellow {{background:#ffd600;}} .dot-red {{background:#d50000;}}
 .panel {{padding: 10px 12px; border: 1px solid #ccc; border-radius: 8px; background: {secondary_bg};}}
-.metric-card {{border:1px solid #ddd; border-radius:8px; padding:6px 10px; background: #fff; color: #333;}}
-
 .stApp {{ background-color: {bg}; }}
-h1, h2, h3, h4, h5, h6, p, label, div[data-baseweb="tooltip"], div[data-testid="stMarkdownContainer"] p {{
-    color: {text} !important;
-}}
-.stButton>button {{
-    background-color: {primary};
-    color: white !important;
-    border-radius: 8px;
-    border: 1px solid {primary};
-}}
-.stButton>button:hover {{
-    background-color: {primary}e0; /* Add transparency for hover effect */
-    border: 1px solid {primary}e0;
-}}
-div[data-testid="stSidebarUserContent"] {{ /* Sidebar background */
-    background-color: {secondary_bg};
-}}
-</style>
-"""
+h1, h2, h3, h4, h5, h6, p, label, div[data-baseweb="tooltip"], div[data-testid="stMarkdownContainer"] p {{color: {text} !important;}}
+.stButton>button {{background-color: {primary};color: white !important;border-radius: 8px;border: 1px solid {primary};}}
+.stButton>button:hover {{background-color: {primary}e0; border: 1px solid {primary}e0;}}
+div[data-testid="stSidebarUserContent"] {{background-color: {secondary_bg};}}
+</style>"""
 
 # -------------------------
 # Default Agents YAML
@@ -93,319 +287,204 @@ DEFAULT_AGENTS_YAML = """
   model: gemini-1.5-flash
   temperature: 0.3
   max_tokens: 1024
-  system_prompt: You are an expert summarizer. Your goal is to produce a concise and accurate summary of the provided text.
-  user_prompt: 'Summarize the following text in 3-5 clear bullet points:
-
-    {{input}}'
+  system_prompt: You are an expert summarizer. Your goal is to produce a concise, accurate summary.
+  user_prompt: 'Summarize the following text in 3-5 clear bullet points:\\n\\n{{input}}'
 - name: Style_Rewriter
   provider: openai
   model: gpt-4o-mini
   temperature: 0.7
   max_tokens: 1024
-  system_prompt: You are a professional editor. Rewrite the text to be more clear, professional, and engaging.
-  user_prompt: 'Rewrite this text to enhance its clarity and professional tone, while preserving the core message:
-
-    {{input}}'
+  system_prompt: You are a professional editor. Rewrite text to be more clear, professional, and engaging.
+  user_prompt: 'Rewrite this text to enhance its clarity and professional tone, preserving the core message:\\n\\n{{input}}'
 """
 DEFAULT_AGENTS = yaml.safe_load(DEFAULT_AGENTS_YAML)
 
 # -------------------------
 # Session State Initialization
 # -------------------------
-if "dataset" not in st.session_state:
-    st.session_state.dataset = []
-if "schema" not in st.session_state:
-    st.session_state.schema = []
-if "template_text" not in st.session_state:
-    st.session_state.template_text = ""
-if "generated_docs" not in st.session_state:
-    st.session_state.generated_docs = []
-if "agents" not in st.session_state:
-    st.session_state.agents = DEFAULT_AGENTS.copy()
-if "pipeline_history" not in st.session_state:
-    st.session_state.pipeline_history = []
-if "is_running" not in st.session_state:
-    st.session_state.is_running = False
-if "global_model_override" not in st.session_state:
-    st.session_state.global_model_override = None
-if "global_provider_override" not in st.session_state:
-    st.session_state.global_provider_override = None
-if "last_export_zip" not in st.session_state:
-    st.session_state.last_export_zip = None
-if "images" not in st.session_state:
-    st.session_state.images = []
-if "selected_theme" not in st.session_state:
-    st.session_state.selected_theme = "Flora (Default)"
+ss = st.session_state
+if "dataset" not in ss: ss.dataset = []
+if "schema" not in ss: ss.schema = []
+if "template_text" not in ss: ss.template_text = ""
+if "generated_docs" not in ss: ss.generated_docs = []
+if "agents" not in ss: ss.agents = DEFAULT_AGENTS.copy()
+if "pipeline_history" not in ss: ss.pipeline_history = []
+if "is_running" not in ss: ss.is_running = False
+if "global_model_override" not in ss: ss.global_model_override = None
+if "global_provider_override" not in ss: ss.global_provider_override = None
+if "last_export_zip" not in ss: ss.last_export_zip = None
+if "images" not in ss: ss.images = []
+if "selected_theme" not in ss: ss.selected_theme = "Flora (Default)"
 
 # Apply selected theme
-st.markdown(get_theme_css(st.session_state.selected_theme), unsafe_allow_html=True)
-
+st.markdown(get_theme_css(ss.selected_theme), unsafe_allow_html=True)
 
 # -------------------------
-# Sidebar: Keys & Global Controls
+# Sidebar
 # -------------------------
 with st.sidebar:
     st.header("🌸 Flora Controls")
-    
-    # Theme Selector
-    st.selectbox(
-        "Choose a Theme",
-        options=list(THEMES.keys()),
-        key="selected_theme",
-    )
+    st.selectbox("Choose a Theme", options=list(THEMES.keys()), key="selected_theme")
     st.divider()
 
-    st.markdown("<div class='panel'>Set API keys in Secrets for Spaces.</div>", unsafe_allow_html=True)
-
-    google_key_ok = bool(os.getenv("GOOGLE_API_KEY"))
-    openai_key_ok = bool(os.getenv("OPENAI_API_KEY"))
-    xai_key_ok = bool(os.getenv("XAI_API_KEY"))
-
+    st.markdown("<div class='panel'>Set API keys in HF Secrets.</div>", unsafe_allow_html=True)
     st.write("API Key Status")
-    colk1, colk2, colk3 = st.columns(3)
-    colk1.markdown(f"<span class='badge {'badge-ok' if google_key_ok else 'badge-err'}'>Gemini</span>", unsafe_allow_html=True)
-    colk2.markdown(f"<span class='badge {'badge-ok' if openai_key_ok else 'badge-err'}'>OpenAI</span>", unsafe_allow_html=True)
-    colk3.markdown(f"<span class='badge {'badge-ok' if xai_key_ok else 'badge-err'}'>Grok</span>", unsafe_allow_html=True)
-
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f"<span class='badge {'badge-ok' if os.getenv('GOOGLE_API_KEY') else 'badge-err'}'>Gemini</span>", unsafe_allow_html=True)
+    c2.markdown(f"<span class='badge {'badge-ok' if os.getenv('OPENAI_API_KEY') else 'badge-err'}'>OpenAI</span>", unsafe_allow_html=True)
+    c3.markdown(f"<span class='badge {'badge-ok' if os.getenv('XAI_API_KEY') else 'badge-err'}'>Grok</span>", unsafe_allow_html=True)
     st.divider()
+
     st.caption("Global Provider/Model Override")
-    ALL_MODELS = [
-        "None", "gemini-1.5-flash", "gemini-1.5-pro",
-        "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
-        "llama3-70b-8192", "llama3-8b-8192"
-    ]
-    provider_choice = st.selectbox("Provider override", ["None", "gemini", "openai", "grok"], index=0, key="global_provider_select")
-    model_choice = st.selectbox("Model override", ALL_MODELS, index=0, key="global_model_select")
-    st.session_state.global_provider_override = None if provider_choice == "None" else provider_choice
-    st.session_state.global_model_override = None if model_choice == "None" else model_choice
-
+    ALL_MODELS = ["None", "gemini-1.5-flash", "gemini-1.5-pro", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "llama3-70b-8192", "llama3-8b-8192"]
+    prov_choice = st.selectbox("Provider override", ["None", "gemini", "openai", "grok"])
+    mod_choice = st.selectbox("Model override", ALL_MODELS)
+    ss.global_provider_override = None if prov_choice == "None" else prov_choice
+    ss.global_model_override = None if mod_choice == "None" else mod_choice
     st.divider()
+
     st.caption("Agents Configuration")
     yaml_file = st.file_uploader("Load agents.yaml", type=["yaml", "yml"])
-    if yaml_file is not None:
+    if yaml_file:
         try:
             agents_loaded = yaml.safe_load(yaml_file)
-            if isinstance(agents_loaded, list) and all(isinstance(item, dict) for item in agents_loaded):
-                st.session_state.agents = agents_loaded
-                st.success("Loaded agents.yaml successfully.")
-            else:
-                st.error("Invalid YAML: Must be a list of agent dictionaries.")
-        except Exception as e:
-            st.error(f"Error parsing YAML: {e}")
-
-    def download_agents_yaml():
-        buf = io.StringIO()
-        yaml.safe_dump(st.session_state.agents, buf, sort_keys=False, allow_unicode=True)
-        return buf.getvalue().encode("utf-8")
-
-    st.download_button("Download Current agents.yaml", data=download_agents_yaml(), file_name="agents.yaml")
-
+            if isinstance(agents_loaded, list) and all(isinstance(i, dict) for i in agents_loaded):
+                ss.agents = agents_loaded
+                st.success("Loaded agents.yaml.")
+            else: st.error("YAML must be a list of agent dictionaries.")
+        except Exception as e: st.error(f"Error parsing YAML: {e}")
+    
+    st.download_button("Download Current agents.yaml", data=yaml.safe_dump(ss.agents).encode("utf-8"), file_name="agents.yaml")
     st.divider()
+
     st.caption("Images for Vision Models")
-    imgs = st.file_uploader("Upload images (for Gemini/OpenAI)", type=["png","jpg","jpeg","webp"], accept_multiple_files=True)
-    if imgs:
-        st.session_state.images = imgs
+    imgs = st.file_uploader("Upload images", type=["png","jpg","jpeg","webp"], accept_multiple_files=True)
+    if imgs: ss.images = imgs
 
 # -------------------------
-# Header / Dashboard
+# Main App UI
 # -------------------------
 st.title("Agentic Docs Builder – Flora Edition")
-colA, colB, colC, colD = st.columns(4)
-colA.metric("Records Loaded", len(st.session_state.dataset))
-colB.metric("Schema Columns", len(st.session_state.schema))
-colC.metric("Generated Docs", len(st.session_state.generated_docs))
-colD.metric("Configured Agents", len(st.session_state.agents))
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Records", len(ss.dataset))
+c2.metric("Schema Columns", len(ss.schema))
+c3.metric("Generated Docs", len(ss.generated_docs))
+c4.metric("Agents", len(ss.agents))
 
-# -------------------------
-# Main Tabs
-# -------------------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "1. Data Ingestion", "2. Template", "3. Generated Docs", "4. Agent Configuration", "5. Run Pipeline", "6. Export"
-])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["1. Data", "2. Template", "3. Docs", "4. Agents", "5. Pipeline", "6. Export"])
 
-with tab1:
+with tab1: # Data Ingestion
     st.subheader("Upload Your Dataset")
-    st.markdown("Supports CSV, JSON (array of objects), XLSX, ODS, or TXT (one record per line).")
-    dataset_file = st.file_uploader("Choose a file", type=["csv","json","xlsx","ods","txt"])
-    if dataset_file is not None:
+    ds_file = st.file_uploader("Supports CSV, JSON, XLSX, ODS, TXT", type=["csv","json","xlsx","ods","txt"])
+    if ds_file:
         try:
             with st.spinner("Parsing file..."):
-                records = parse_dataset_file(dataset_file)
-                st.session_state.dataset = records
-                st.session_state.schema = guess_schema_from_records(records)
-            st.success(f"Successfully loaded {len(records)} records.")
-            if len(records) > 0:
-                st.dataframe(pd.DataFrame(records).head(10), use_container_width=True)
-        except Exception as e:
-            st.error(f"Failed to parse dataset: {e}")
+                records = parse_dataset_file(ds_file)
+                ss.dataset, ss.schema = records, guess_schema_from_records(records)
+            st.success(f"Loaded {len(records)} records.")
+            if records: st.dataframe(pd.DataFrame(records).head(10), use_container_width=True)
+        except Exception as e: st.error(f"Failed to parse: {e}")
 
-with tab2:
+with tab2: # Template
     st.subheader("Define a Document Template")
-    st.markdown("Use `{{column_name}}` placeholders to insert data from your dataset.")
-    colT1, colT2 = st.columns(2)
-    with colT1:
-        template_file = st.file_uploader("Or upload a template", type=["txt","md","docx"])
-        if template_file is not None:
-            try:
-                st.session_state.template_text = parse_template_file(template_file)
-                st.success("Template loaded.")
-            except Exception as e:
-                st.error(f"Failed to read template: {e}")
-        st.text_area("Template Content", key="template_text", height=300)
-        
-        gen_col1, gen_col2 = st.columns(2)
-        if gen_col1.button("Generate Documents", type="primary", disabled=(len(st.session_state.dataset)==0 or not st.session_state.template_text.strip())):
-            try:
-                docs = render_template_on_dataset(st.session_state.dataset, st.session_state.template_text)
-                st.session_state.generated_docs = docs
-                st.success(f"Generated {len(docs)} documents.")
-            except Exception as e:
-                st.error(f"Generation error: {e}")
-        if gen_col2.button("Clear Documents"):
-            st.session_state.generated_docs = []
-            st.info("Cleared generated documents.")
-            
-    with colT2:
-        st.markdown("#### Live Preview (using first record)")
-        if len(st.session_state.dataset) > 0 and st.session_state.template_text.strip():
-            preview = render_template_on_record(st.session_state.template_text, st.session_state.dataset[0])
-            st.markdown(f"<div class='panel'>{preview[:4000]}</div>", unsafe_allow_html=True)
-        else:
-            st.info("Upload data and define a template to see a preview.")
+    c1, c2 = st.columns(2)
+    with c1:
+        tpl_file = st.file_uploader("Upload template (.txt, .md, .docx)", type=["txt","md","docx"])
+        if tpl_file:
+            try: ss.template_text = parse_template_file(tpl_file)
+            except Exception as e: st.error(f"Failed to read: {e}")
+        st.text_area("Template (use `{{column}}` placeholders)", key="template_text", height=300)
+        if st.button("Generate Docs", type="primary", disabled=(not ss.dataset or not ss.template_text)):
+            ss.generated_docs = render_template_on_dataset(ss.dataset, ss.template_text)
+            st.success(f"Generated {len(ss.generated_docs)} documents.")
+    with c2:
+        st.markdown("#### Live Preview")
+        if ss.dataset and ss.template_text:
+            preview = render_template_on_record(ss.template_text, ss.dataset[0])
+            st.markdown(f"<div class='panel'>{preview[:2000]}</div>", unsafe_allow_html=True)
+        else: st.info("Upload data and a template for a preview.")
 
-with tab3:
+with tab3: # Generated Docs
     st.subheader("Review and Edit Generated Documents")
-    if not st.session_state.generated_docs:
-        st.info("No documents generated yet. Go to the 'Template' tab to create them.")
-    else:
-        for i, doc in enumerate(st.session_state.generated_docs):
-            with st.expander(f"Document {i+1}: {doc.get('filename','doc_'+str(i+1))}"):
-                new_name = st.text_input("Filename", value=doc.get("filename", f"doc_{i+1}.txt"), key=f"fn_{i}")
-                new_content = st.text_area("Content", value=doc.get("content",""), height=250, key=f"fc_{i}")
-                st.session_state.generated_docs[i]["filename"] = new_name
-                st.session_state.generated_docs[i]["content"] = new_content
+    if not ss.generated_docs: st.info("No documents generated yet.")
+    for i, doc in enumerate(ss.generated_docs):
+        with st.expander(f"Doc {i+1}: {doc.get('filename','doc_{i+1}')}"):
+            ss.generated_docs[i]["filename"] = st.text_input("Filename", doc.get("filename"), key=f"fn_{i}")
+            ss.generated_docs[i]["content"] = st.text_area("Content", doc.get("content"), height=250, key=f"fc_{i}")
 
-with tab4:
+with tab4: # Agent Config
     st.subheader("Configure Agent Chain")
-    st.caption("Edit agent parameters. Use the sidebar to override providers/models globally for testing.")
-    for idx, agent in enumerate(st.session_state.agents):
+    for idx, agent in enumerate(ss.agents):
         with st.expander(f"Agent {idx+1} • {agent.get('name', 'Agent')}"):
-            c1, c2, c3 = st.columns([1,1,1])
-            agent["name"] = c1.text_input("Name", value=agent.get("name","Agent"), key=f"a_name_{idx}")
-            agent["provider"] = c2.selectbox("Provider", ["gemini","openai","grok"], index=["gemini","openai","grok"].index(agent.get("provider","gemini")), key=f"a_provider_{idx}")
-            
-            current_model = agent.get("model","gemini-1.5-flash")
-            try: model_index = ALL_MODELS.index(current_model)
-            except ValueError: model_index = 0
-            
-            agent["model"] = c3.selectbox( "Model", ALL_MODELS, index=model_index, key=f"a_model_{idx}" )
-            agent["temperature"] = st.slider("Temperature", 0.0, 1.0, float(agent.get("temperature",0.5)), 0.05, key=f"a_temp_{idx}")
-            agent["max_tokens"] = st.number_input("Max Tokens", 128, 16384, int(agent.get("max_tokens",2048)), 64, key=f"a_maxtok_{idx}")
-            agent["system_prompt"] = st.text_area("System Prompt", value=agent.get("system_prompt",""), height=120, key=f"a_sysp_{idx}")
-            agent["user_prompt"] = st.text_area("User Prompt (use {{input}} token)", value=agent.get("user_prompt",""), height=180, key=f"a_usrp_{idx}")
-
+            c1, c2, c3 = st.columns(3)
+            agent["name"] = c1.text_input("Name", agent.get("name"), key=f"a_name_{idx}")
+            agent["provider"] = c2.selectbox("Provider", ["gemini","openai","grok"], index=["gemini","openai","grok"].index(agent.get("provider","gemini")), key=f"a_prov_{idx}")
+            try: model_idx = ALL_MODELS.index(agent.get("model"))
+            except ValueError: model_idx = 0
+            agent["model"] = c3.selectbox("Model", ALL_MODELS, index=model_idx, key=f"a_model_{idx}")
+            agent["temperature"] = st.slider("Temp", 0.0, 1.0, float(agent.get("temperature",0.5)), 0.05, key=f"a_temp_{idx}")
+            agent["max_tokens"] = st.number_input("Max Tokens", 128, 16384, int(agent.get("max_tokens",2048)), 64, key=f"a_maxt_{idx}")
+            agent["system_prompt"] = st.text_area("System Prompt", agent.get("system_prompt"), height=120, key=f"a_sysp_{idx}")
+            agent["user_prompt"] = st.text_area("User Prompt (use {{input}})", agent.get("user_prompt"), height=180, key=f"a_usrp_{idx}")
     st.markdown("---")
-    colBA1, colBA2 = st.columns(2)
-    if colBA1.button("➕ Add New Agent"):
-        st.session_state.agents.append({
-            "name": f"New Agent {len(st.session_state.agents) + 1}", "provider": "gemini", 
-            "model": "gemini-1.5-flash", "temperature": 0.5, "max_tokens": 2048,
-            "system_prompt": "You are a helpful assistant.", "user_prompt": "{{input}}"})
+    c1, c2 = st.columns(2)
+    if c1.button("➕ Add New Agent"):
+        ss.agents.append({"name": f"New Agent {len(ss.agents)+1}", "provider": "gemini", "model": "gemini-1.5-flash", "temperature": 0.5, "max_tokens": 2048, "system_prompt": "", "user_prompt": "{{input}}"})
         st.rerun()
-    if colBA2.button("🔄 Reset to Default Agents"):
-        st.session_state.agents = DEFAULT_AGENTS.copy()
+    if c2.button("🔄 Reset to Default"):
+        ss.agents = DEFAULT_AGENTS.copy()
         st.rerun()
 
-with tab5:
+with tab5: # Pipeline
     st.subheader("Execute Agent Pipeline")
-    st.caption("Run a single input through the configured agent chain to test its performance.")
-
-    if st.session_state.images:
-        uses_grok = any(agent.get("provider") == "grok" for agent in st.session_state.agents)
-        if uses_grok:
-            st.warning("🖼️ Images have been uploaded, but the **Grok** provider in this app currently does not support image input. Images will be ignored for Grok agents.")
-
-    default_input = st.session_state.generated_docs[0]["content"] if st.session_state.generated_docs else ""
-    input_text = st.text_area("Pipeline Input Text", value=default_input, height=250, key="pipeline_input_text")
-
-    if st.button("Run Pipeline", type="primary", disabled=(st.session_state.is_running or not st.session_state.agents)):
-        st.session_state.is_running = True
-        st.session_state.pipeline_history = []
-        progress = st.progress(0, "Initializing pipeline...")
-        status_area = st.empty()
-        
+    default_input = ss.generated_docs[0]["content"] if ss.generated_docs else ""
+    input_text = st.text_area("Pipeline Input Text", default_input, height=250)
+    if st.button("Run Pipeline", type="primary", disabled=(ss.is_running or not ss.agents)):
+        ss.is_running, ss.pipeline_history = True, []
+        progress, status_area = st.progress(0, "Initializing..."), st.empty()
         current_text = input_text
-        total_agents = len(st.session_state.agents)
-        
-        for idx, agent in enumerate(st.session_state.agents, start=1):
-            start_t = time.time()
+        for idx, agent in enumerate(ss.agents, 1):
             exec_agent = agent.copy()
-            if st.session_state.global_provider_override: exec_agent["provider"] = st.session_state.global_provider_override
-            if st.session_state.global_model_override: exec_agent["model"] = st.session_state.global_model_override
-            
-            status_area.markdown(f"<span class='status-dot dot-yellow'></span> Running agent {idx}/{total_agents}: **{exec_agent.get('name')}**", unsafe_allow_html=True)
-            progress.progress(idx / total_agents, f"Running: {exec_agent.get('name')}")
-            
+            if ss.global_provider_override: exec_agent["provider"] = ss.global_provider_override
+            if ss.global_model_override: exec_agent["model"] = ss.global_model_override
+            status_area.markdown(f"<span class='status-dot dot-yellow'></span> Running {idx}/{len(ss.agents)}: **{exec_agent['name']}**", unsafe_allow_html=True)
+            progress.progress(idx/len(ss.agents), f"Running: {exec_agent['name']}")
             try:
-                output_text = run_agent_step(
-                    provider=exec_agent["provider"], model=exec_agent["model"],
-                    system_prompt=exec_agent.get("system_prompt",""), user_prompt=exec_agent.get("user_prompt","{{input}}"),
-                    input_text=current_text, temperature=float(exec_agent.get("temperature",0.5)),
-                    max_tokens=int(exec_agent.get("max_tokens",2048)),
-                    images=st.session_state.images if exec_agent["provider"] != "grok" else None
-                )
-                elapsed = time.time() - start_t
-                st.session_state.pipeline_history.append({"agent": exec_agent.get("name"), "input": current_text, "output": output_text, "error": None, "elapsed": elapsed})
-                current_text = output_text
-                status_area.markdown(f"<span class='status-dot dot-green'></span> Completed agent {idx}/{total_agents}: **{exec_agent.get('name')}**", unsafe_allow_html=True)
+                output = run_agent_step(**exec_agent, input_text=current_text, images=ss.images)
+                ss.pipeline_history.append({"agent": exec_agent['name'], "input": current_text, "output": output, "error": None})
+                current_text = output
             except ProviderError as e:
-                elapsed = time.time() - start_t
-                st.session_state.pipeline_history.append({"agent": exec_agent.get("name"), "input": current_text, "output": None, "error": str(e), "elapsed": elapsed})
-                status_area.markdown(f"<span class='status-dot dot-red'></span> Error in agent {idx}/{total_agents}: **{exec_agent.get('name')}**", unsafe_allow_html=True)
-                st.error(f"Pipeline stopped due to an error: {e}")
+                ss.pipeline_history.append({"agent": exec_agent['name'], "input": current_text, "output": None, "error": str(e)})
+                status_area.markdown(f"<span class='status-dot dot-red'></span> Error on agent {idx}", unsafe_allow_html=True)
+                st.error(f"Pipeline stopped: {e}")
                 break
-        
-        st.session_state.is_running = False
-
-    if st.session_state.pipeline_history:
+        status_area.markdown("<span class='status-dot dot-green'></span> Pipeline finished.", unsafe_allow_html=True)
+        ss.is_running = False
+    if ss.pipeline_history:
         st.markdown("--- \n### Pipeline Results")
-        for step in st.session_state.pipeline_history:
-            dot_color = "dot-green" if step["error"] is None else "dot-red"
-            with st.expander(f"<{step['agent']}> - {step['elapsed']:.2f}s", expanded=(step["error"] is not None)):
-                st.markdown(f"<span class='status-dot {dot_color}'></span> **Agent:** {step['agent']}", unsafe_allow_html=True)
-                st.text_area("Input", value=step["input"] or "", height=150, disabled=True, key=f"in_{step['agent']}_{int(step['elapsed'])}")
-                if step["error"]:
-                    st.error(step["error"])
-                else:
-                    st.text_area("Output", value=step["output"] or "", height=150, disabled=True, key=f"out_{step['agent']}_{int(step['elapsed'])}")
+        for i, step in enumerate(ss.pipeline_history):
+            with st.expander(f"Step {i+1}: <{step['agent']}>", expanded=(step["error"] is not None)):
+                st.text_area("Input", step["input"], height=150, disabled=True, key=f"in_{i}")
+                if step["error"]: st.error(step["error"])
+                else: st.text_area("Output", step["output"], height=150, disabled=True, key=f"out_{i}")
 
-with tab6:
+with tab6: # Export
     st.subheader("Export Documents")
-    if not st.session_state.generated_docs:
-        st.info("No documents to export. Please generate documents in the 'Template' tab first.")
+    if not ss.generated_docs: st.info("Generate documents in the 'Template' tab to export.")
     else:
-        export_fmt = st.selectbox("Export format", ["txt", "md", "docx", "zip-txt", "zip-md", "zip-docx"])
-        
-        if "zip" in export_fmt:
+        fmt = st.selectbox("Export format", ["txt", "md", "docx", "zip-txt", "zip-md", "zip-docx"])
+        if "zip" in fmt:
             if st.button("Build ZIP Archive", type="primary"):
-                ext = export_fmt.split("-")[1]
-                with st.spinner(f"Creating .{ext} ZIP archive..."):
-                    zbuf = build_zip_from_docs(st.session_state.generated_docs, ext=ext)
-                    st.session_state.last_export_zip = zbuf
-                st.success("ZIP archive is ready for download.")
-            if st.session_state.last_export_zip:
-                st.download_button("Download ZIP", data=st.session_state.last_export_zip, file_name=f"docs_export_{int(time.time())}.zip")
+                with st.spinner("Creating ZIP..."):
+                    ss.last_export_zip = build_zip_from_docs(ss.generated_docs, ext=fmt.split("-")[1])
+                st.success("ZIP ready.")
+            if ss.last_export_zip:
+                st.download_button("Download ZIP", ss.last_export_zip, f"docs_{int(time.time())}.zip")
         else:
-            doc_idx = st.number_input("Select document index to download (1-based)", 1, len(st.session_state.generated_docs), 1)
-            doc = st.session_state.generated_docs[doc_idx - 1]
-            filename_base = os.path.splitext(doc.get("filename") or f"doc_{doc_idx}")[0]
-            
-            if export_fmt == "docx":
-                buf = export_docx(doc["content"])
-                st.download_button("Download DOCX", data=buf, file_name=f"{filename_base}.docx")
+            idx = st.number_input("Doc index (1-based)", 1, len(ss.generated_docs), 1) - 1
+            doc = ss.generated_docs[idx]
+            fname_base, _ = os.path.splitext(doc.get("filename") or f"doc_{idx+1}")
+            if fmt == "docx":
+                st.download_button("Download DOCX", export_docx(doc["content"]), f"{fname_base}.docx")
             else:
-                ext = "md" if export_fmt == "md" else "txt"
-                st.download_button(f"Download .{ext.upper()}", data=doc["content"].encode("utf-8"), file_name=f"{filename_base}.{ext}")
-
-st.divider()
-st.caption("Powered by Gemini, OpenAI, and Grok. Image understanding available on vision-capable models.")
+                st.download_button(f"Download .{fmt.upper()}", doc["content"].encode("utf-8"), f"{fname_base}.{fmt}")
