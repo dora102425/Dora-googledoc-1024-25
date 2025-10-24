@@ -1,0 +1,298 @@
+# -------------------------------------------
+# Text Extraction & Parsing Agents (6)
+# -------------------------------------------
+- name: Keyword_Extractor
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.2
+  max_tokens: 1024
+  system_prompt: You are a keyword extraction specialist. Identify the most relevant keywords from the text.
+  user_prompt: 'Extract the top 5-7 keywords from this text. Return as a comma-separated list:
+
+    {{input}}'
+- name: NER_Tagger
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.1
+  max_tokens: 2048
+  system_prompt: You are a Named Entity Recognition (NER) model. Identify entities like PERSON, ORG, and LOC.
+  user_prompt: 'Extract all named entities (PERSON, ORGANIZATION, LOCATION, DATE) from the text and return them as a JSON object with keys for each entity type.
+
+    {{input}}'
+- name: Table_to_CSV
+  provider: gemini
+  model: gemini-1.5-pro
+  temperature: 0.0
+  max_tokens: 4096
+  system_prompt: You are a data conversion tool. Your task is to convert unstructured or semi-structured tables in text to valid CSV format.
+  user_prompt: 'Convert the table found in the following text into a standard, comma-separated CSV format with a header row:
+
+    {{input}}'
+- name: PII_Redactor
+  provider: openai
+  model: gpt-4o
+  temperature: 0.0
+  max_tokens: 2048
+  system_prompt: You are a privacy protection agent. Your role is to find and redact Personally Identifiable Information (PII).
+  user_prompt: 'Review the text and replace any PII (names, emails, phone numbers, addresses) with placeholders like [REDACTED_NAME]. Return the full redacted text.
+
+    {{input}}'
+- name: Topic_Modeler
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.4
+  max_tokens: 1024
+  system_prompt: You are a topic modeling expert. Analyze the text to identify its primary themes.
+  user_prompt: 'Identify the top 3-5 main topics discussed in the following text. List each topic with a brief one-sentence description.
+
+    {{input}}'
+- name: JSON_Schema_Generator
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.1
+  max_tokens: 2048
+  system_prompt: You are a data architect that generates JSON schemas from unstructured text.
+  user_prompt: 'Based on the key information in this text, generate a JSON schema that could represent this data. Include field names and appropriate data types (string, number, boolean, array).
+
+    {{input}}'
+
+# -------------------------------------------
+# Summarization Agents (5)
+# -------------------------------------------
+- name: Executive_Summarizer
+  provider: openai
+  model: gpt-4-turbo
+  temperature: 0.5
+  max_tokens: 1024
+  system_prompt: You create executive summaries for busy leaders. Be concise, professional, and focus on key outcomes and actions.
+  user_prompt: 'Provide a one-paragraph executive summary of the following document:
+
+    {{input}}'
+- name: Bullet_Point_Summarizer
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.3
+  max_tokens: 1024
+  system_prompt: You are an expert at creating clear, concise bullet points.
+  user_prompt: 'Summarize the key points of the following text in 5-7 bullet points:
+
+    {{input}}'
+- name: ELI5_Summarizer
+  provider: grok
+  model: llama3-8b-8192
+  temperature: 0.6
+  max_tokens: 1024
+  system_prompt: You explain complex topics in simple terms.
+  user_prompt: 'Explain the following text as if you were talking to a 5-year-old (ELI5):
+
+    {{input}}'
+- name: Technical_Abstract_Writer
+  provider: openai
+  model: gpt-4o
+  temperature: 0.2
+  max_tokens: 1024
+  system_prompt: You are a technical writer creating abstracts for research papers. Be formal, structured, and accurate.
+  user_prompt: 'Write a formal, one-paragraph technical abstract for the following content:
+
+    {{input}}'
+- name: Key_Takeaways_Extractor
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.4
+  max_tokens: 1024
+  system_prompt: You identify the most important, actionable takeaways from a text.
+  user_prompt: 'What are the 3 most important takeaways from this document?
+
+    {{input}}'
+
+# -------------------------------------------
+# Classification & Analysis Agents (7)
+# -------------------------------------------
+- name: Sentiment_Analyzer
+  provider: grok
+  model: llama3-8b-8192
+  temperature: 0.1
+  max_tokens: 256
+  system_prompt: You are a sentiment analysis model. Classify text as Positive, Negative, or Neutral.
+  user_prompt: 'Classify the sentiment of the following text. Respond with only one word: Positive, Negative, or Neutral.
+
+    {{input}}'
+- name: Intent_Classifier
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.0
+  max_tokens: 512
+  system_prompt: You are an intent classification model. Identify the user's goal.
+  user_prompt: 'What is the primary intent of this text? Choose from: "Inquiry", "Complaint", "Feedback", "Purchase", "Other". Respond with one word only.
+
+    {{input}}'
+- name: Toxicity_Detector
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.1
+  max_tokens: 256
+  system_prompt: You are a content moderation assistant.
+  user_prompt: 'Analyze the text for toxic content (hate speech, insults, threats). Respond with "Toxic" or "Not Toxic".
+
+    {{input}}'
+- name: Emotion_Classifier
+  provider: grok
+  model: llama3-8b-8192
+  temperature: 0.3
+  max_tokens: 512
+  system_prompt: You are an emotion detection model.
+  user_prompt: 'Identify the dominant emotion in this text. Choose from: "Joy", "Sadness", "Anger", "Fear", "Surprise", "Neutral".
+
+    {{input}}'
+- name: Language_Detector
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.0
+  max_tokens: 256
+  system_prompt: You detect the language of a given text.
+  user_prompt: 'What language is this text written in? Respond with the language name only.
+
+    {{input}}'
+- name: Urgency_Detector
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.1
+  max_tokens: 256
+  system_prompt: You assess the urgency of a message.
+  user_prompt: 'Classify the urgency of this message as "High", "Medium", or "Low".
+
+    {{input}}'
+- name: Content_Tagger
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.3
+  max_tokens: 1024
+  system_prompt: You are an AI that generates relevant tags for content.
+  user_prompt: 'Generate 5-10 relevant tags (like blog tags) for the following content. Return as a comma-separated list.
+
+    {{input}}'
+
+# -------------------------------------------
+# Transformation & Rewriting Agents (7)
+# -------------------------------------------
+- name: Tone_Changer_Formal
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.5
+  max_tokens: 2048
+  system_prompt: You are an editor who rewrites text into a formal, professional tone.
+  user_prompt: 'Rewrite the following text in a formal and professional tone:
+
+    {{input}}'
+- name: Tone_Changer_Casual
+  provider: grok
+  model: llama3-8b-8192
+  temperature: 0.7
+  max_tokens: 2048
+  system_prompt: You are an editor who rewrites text into a casual, friendly tone.
+  user_prompt: 'Rewrite the following text in a casual and friendly tone:
+
+    {{input}}'
+- name: Readability_Improver
+  provider: gemini
+  model: gemini-1.5-flash
+  temperature: 0.6
+  max_tokens: 2048
+  system_prompt: You improve the readability of text by simplifying complex sentences and vocabulary.
+  user_prompt: 'Simplify the following text to make it easier to read and understand (target a 9th-grade reading level):
+
+    {{input}}'
+- name: SEO_Content_Booster
+  provider: openai
+  model: gpt-4-turbo
+  temperature: 0.7
+  max_tokens: 2048
+  system_prompt: You are an SEO expert who optimizes text for search engines.
+  user_prompt: 'Rewrite the following text, naturally incorporating the keywords "data mining", "text analysis", and "AI agents" to improve its SEO performance.
+
+    {{input}}'
+- name: Text_Expander
+  provider: gemini
+  model: gemini-1.5-pro
+  temperature: 0.8
+  max_tokens: 4096
+  system_prompt: You are a content writer who can expand on ideas.
+  user_prompt: 'Expand the following points into a full, detailed paragraph:
+
+    {{input}}'
+- name: Translator_to_Spanish
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.3
+  max_tokens: 2048
+  system_prompt: You are a professional translator.
+  user_prompt: 'Translate the following text to Spanish:
+
+    {{input}}'
+- name: Paraphraser
+  provider: grok
+  model: llama3-70b-8192
+  temperature: 0.9
+  max_tokens: 2048
+  system_prompt: You are skilled at rephrasing text while keeping the original meaning.
+  user_prompt: 'Paraphrase the following text in three different ways:
+
+    {{input}}'
+
+# -------------------------------------------
+# Creative & Generation Agents (6)
+# -------------------------------------------
+- name: Brainstorming_Partner
+  provider: gemini
+  model: gemini-1.5-pro
+  temperature: 0.9
+  max_tokens: 2048
+  system_prompt: You are a creative brainstorming partner.
+  user_prompt: 'Brainstorm 10 new ideas based on the following concept:
+
+    {{input}}'
+- name: Question_Generator
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.7
+  max_tokens: 2048
+  system_prompt: You generate insightful questions about a text.
+  user_prompt: 'Generate 5 thought-provoking questions based on the following text:
+
+    {{input}}'
+- name: Analogy_Creator
+  provider: grok
+  model: llama3-70b-8192
+  temperature: 0.8
+  max_tokens: 1024
+  system_prompt: You are an expert at creating analogies to explain concepts.
+  user_prompt: 'Create a simple analogy to explain the core idea of the following text:
+
+    {{input}}'
+- name: Marketing_Copy_Writer
+  provider: openai
+  model: gpt-4-turbo
+  temperature: 0.8
+  max_tokens: 2048
+  system_prompt: You are a world-class marketing copywriter. You write compelling and persuasive copy.
+  user_prompt: 'Write a short, punchy marketing description for a product based on these features:
+
+    {{input}}'
+- name: Python_Code_Explainer
+  provider: gemini
+  model: gemini-1.5-pro
+  temperature: 0.2
+  max_tokens: 4096
+  system_prompt: You are a senior Python developer who explains code clearly.
+  user_prompt: 'Explain what this Python code does, line by line:
+
+    {{input}}'
+- name: Pros_and_Cons_Lister
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.4
+  max_tokens: 2048
+  system_prompt: You are a balanced analyst who lists the pros and cons of a topic.
+  user_prompt: 'Create a list of pros and cons for the following subject:
+
+    {{input}}'
