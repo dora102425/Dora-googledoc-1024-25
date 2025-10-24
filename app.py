@@ -91,7 +91,7 @@ h1, h2, h3, h4, h5, h6, p, label, .st-emotion-cache-zt3s72, .st-emotion-cache-ue
 DEFAULT_AGENTS_YAML = """
 - name: Summarizer
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.3
   max_tokens: 1024
   system_prompt: You are an expert summarizer. Your goal is to produce a concise and accurate summary of the provided text.
@@ -172,9 +172,9 @@ with st.sidebar:
     st.divider()
     st.caption("Global Provider/Model Override")
     ALL_MODELS = [
-        "None", "gemini-1.5-flash", "gemini-1.5-pro",
-        "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
-        "llama3-70b-8192", "llama3-8b-8192"
+        "None", "gemini-2.5-flash", "gemini-2.5-flash-lite",
+        "gpt-4o", "gpt-4o-mini", "gpt-4.1-turbo",
+        "grok-4-fast-reasoning", "grok-3-mini"
     ]
     provider_choice = st.selectbox("Provider override", ["None", "gemini", "openai", "grok"], index=0)
     model_choice = st.selectbox("Model override", ALL_MODELS, index=0)
@@ -240,7 +240,7 @@ with tab4:
             agent["provider"] = c2.selectbox("Provider", ["gemini","openai","grok"], index=["gemini","openai","grok"].index(agent.get("provider","gemini")), key=f"a_provider_{idx}")
             
             # Safe index finding for model
-            current_model = agent.get("model","gemini-1.5-flash")
+            current_model = agent.get("model","gemini-2.5-flash")
             try:
                 model_index = ALL_MODELS.index(current_model)
             except ValueError:
@@ -259,7 +259,7 @@ with tab4:
     if colBA1.button("➕ Add New Agent"):
         st.session_state.agents.append({
             "name": f"New Agent {len(st.session_state.agents) + 1}",
-            "provider": "gemini", "model": "gemini-1.5-flash",
+            "provider": "gemini", "model": "gemini-2.5-flash",
             "temperature": 0.5, "max_tokens": 2048,
             "system_prompt": "You are a helpful assistant.", "user_prompt": "{{input}}"
         })
