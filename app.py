@@ -125,7 +125,7 @@ st.set_page_config(page_title="Agentic Docs Builder", page_icon="🌸", layout="
 ss = st.session_state
 
 # State Init
-if "agents" not in ss: ss.agents = yaml.safe_load("- {name: Summarizer, provider: gemini, model: gemini-1.5-flash, temperature: 0.3, max_tokens: 1024, system_prompt: '', user_prompt: 'Summarize:\\n\\n{{input}}'}")
+if "agents" not in ss: ss.agents = yaml.safe_load("- {name: Summarizer, provider: gemini, model: gemini-2.5-flash, temperature: 0.3, max_tokens: 1024, system_prompt: '', user_prompt: 'Summarize:\\n\\n{{input}}'}")
 for k in ["dataset", "schema", "generated_docs", "pipeline_history", "images"]:
     if k not in ss: ss[k] = []
 for k,v in {"template_text":"", "is_running":False, "selected_theme":"Flora (Default)", "pipeline_input":""}.items():
@@ -150,7 +150,7 @@ with st.sidebar:
     st.divider(); st.caption("Global Overrides")
     ss.global_provider_override = st.selectbox("Provider", ["None", "gemini", "openai", "grok"])
     if ss.global_provider_override == "None": ss.global_provider_override = None
-    ss.global_model_override = st.selectbox("Model", ["None", "gemini-1.5-flash", "gemini-1.5-pro", "gpt-4o", "gpt-4o-mini", "llama3-70b-8192", "llama3-8b-8192"])
+    ss.global_model_override = st.selectbox("Model", ["None", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gpt-4o-mini", "gpt-4.1-mini", "grok-4-fast-reasoning", "grok-3-mini"])
     if ss.global_model_override == "None": ss.global_model_override = None
     st.divider(); st.caption("Configuration")
     if (yf := st.file_uploader("Load agents.yaml", type=["yaml", "yml"])): ss.agents = yaml.safe_load(yf)
@@ -190,12 +190,12 @@ with t4:
             c1,c2,c3 = st.columns(3)
             a["name"] = c1.text_input("Name", a.get("name"), key=f"an{i}")
             a["provider"] = c2.selectbox("Provider", ["gemini","openai","grok"], ["gemini","openai","grok"].index(a.get("provider","gemini")), key=f"ap{i}")
-            a["model"] = c3.text_input("Model", a.get("model","gemini-1.5-flash"), key=f"am{i}")
+            a["model"] = c3.text_input("Model", a.get("model","gemini-2.5-flash"), key=f"am{i}")
             a["temperature"] = st.slider("Temp",0.0,1.0,float(a.get("temperature",0.5)),key=f"at{i}")
             a["max_tokens"] = st.number_input("Tokens",1,32768,int(a.get("max_tokens",2048)),key=f"amt{i}")
             a["system_prompt"] = st.text_area("System Prompt", a.get("system_prompt",""), height=100, key=f"asp{i}")
             a["user_prompt"] = st.text_area("User Prompt", a.get("user_prompt","{{input}}"), height=150, key=f"aup{i}")
-    if st.button("➕ Add Agent"): ss.agents.append({"name":"New","provider":"gemini","model":"gemini-1.5-flash","user_prompt":"{{input}}"}); st.rerun()
+    if st.button("➕ Add Agent"): ss.agents.append({"name":"New","provider":"gemini","model":"gemini-2.5-flash","user_prompt":"{{input}}"}); st.rerun()
 
 with t5:
     # Explicitly manage pipeline input with a loader
