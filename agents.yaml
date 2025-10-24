@@ -3,7 +3,7 @@
 # -------------------------------------------
 - name: Keyword_Extractor
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.2
   max_tokens: 1024
   system_prompt: You are a keyword extraction specialist. Identify the most relevant keywords from the text.
@@ -39,7 +39,7 @@
     {{input}}'
 - name: Topic_Modeler
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.4
   max_tokens: 1024
   system_prompt: You are a topic modeling expert. Analyze the text to identify its primary themes.
@@ -61,7 +61,7 @@
 # -------------------------------------------
 - name: Executive_Summarizer
   provider: openai
-  model: gpt-4-turbo
+  model: gpt-4o-mini
   temperature: 0.5
   max_tokens: 1024
   system_prompt: You create executive summaries for busy leaders. Be concise, professional, and focus on key outcomes and actions.
@@ -70,7 +70,7 @@
     {{input}}'
 - name: Bullet_Point_Summarizer
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.3
   max_tokens: 1024
   system_prompt: You are an expert at creating clear, concise bullet points.
@@ -79,7 +79,7 @@
     {{input}}'
 - name: ELI5_Summarizer
   provider: grok
-  model: llama3-8b-8192
+  model: grok-3-mini
   temperature: 0.6
   max_tokens: 1024
   system_prompt: You explain complex topics in simple terms.
@@ -97,7 +97,7 @@
     {{input}}'
 - name: Key_Takeaways_Extractor
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.4
   max_tokens: 1024
   system_prompt: You identify the most important, actionable takeaways from a text.
@@ -110,7 +110,7 @@
 # -------------------------------------------
 - name: Sentiment_Analyzer
   provider: grok
-  model: llama3-8b-8192
+  model: grok-3-mini
   temperature: 0.1
   max_tokens: 256
   system_prompt: You are a sentiment analysis model. Classify text as Positive, Negative, or Neutral.
@@ -128,7 +128,7 @@
     {{input}}'
 - name: Toxicity_Detector
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.1
   max_tokens: 256
   system_prompt: You are a content moderation assistant.
@@ -137,7 +137,7 @@
     {{input}}'
 - name: Emotion_Classifier
   provider: grok
-  model: llama3-8b-8192
+  model: grok-3-mini
   temperature: 0.3
   max_tokens: 512
   system_prompt: You are an emotion detection model.
@@ -146,7 +146,7 @@
     {{input}}'
 - name: Language_Detector
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.0
   max_tokens: 256
   system_prompt: You detect the language of a given text.
@@ -164,7 +164,7 @@
     {{input}}'
 - name: Content_Tagger
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.3
   max_tokens: 1024
   system_prompt: You are an AI that generates relevant tags for content.
@@ -186,7 +186,7 @@
     {{input}}'
 - name: Tone_Changer_Casual
   provider: grok
-  model: llama3-8b-8192
+  model: grok-3-mini
   temperature: 0.7
   max_tokens: 2048
   system_prompt: You are an editor who rewrites text into a casual, friendly tone.
@@ -195,7 +195,7 @@
     {{input}}'
 - name: Readability_Improver
   provider: gemini
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   temperature: 0.6
   max_tokens: 2048
   system_prompt: You improve the readability of text by simplifying complex sentences and vocabulary.
@@ -204,7 +204,7 @@
     {{input}}'
 - name: SEO_Content_Booster
   provider: openai
-  model: gpt-4-turbo
+  model: gpt-4o-mini
   temperature: 0.7
   max_tokens: 2048
   system_prompt: You are an SEO expert who optimizes text for search engines.
@@ -231,7 +231,7 @@
     {{input}}'
 - name: Paraphraser
   provider: grok
-  model: llama3-70b-8192
+  model: grok-3-mini
   temperature: 0.9
   max_tokens: 2048
   system_prompt: You are skilled at rephrasing text while keeping the original meaning.
@@ -262,7 +262,7 @@
     {{input}}'
 - name: Analogy_Creator
   provider: grok
-  model: llama3-70b-8192
+  model: grok-3-mini
   temperature: 0.8
   max_tokens: 1024
   system_prompt: You are an expert at creating analogies to explain concepts.
@@ -271,7 +271,7 @@
     {{input}}'
 - name: Marketing_Copy_Writer
   provider: openai
-  model: gpt-4-turbo
+  model: gpt-4o-mini
   temperature: 0.8
   max_tokens: 2048
   system_prompt: You are a world-class marketing copywriter. You write compelling and persuasive copy.
