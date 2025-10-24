@@ -28,12 +28,11 @@ try:
     from xai_sdk import Client
     from xai_sdk.chat import user as grok_user, system as grok_system
 except ImportError:
-    Client = None
-    grok_user, grok_system = None, None
+    Client, grok_user, grok_system = None, None, None
 
 
 # ==============================================================================
-# --- SERVICES (Now with API key handling from session_state) ---
+# --- SERVICES (CORRECTED with Bug Fix) ---
 # ==============================================================================
 
 class ProviderError(Exception):
@@ -41,7 +40,7 @@ class ProviderError(Exception):
 
 # --- Gemini Service ---
 def run_gemini(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
-    api_key = st.session_state.get("GEMINI_API_KEY")
+    api_key = st.session_state.get("google_api_key")
     if not api_key: raise ProviderError("Google API Key is not set. Please provide it in the sidebar.")
     if not genai: raise ProviderError("google-generativeai is not installed.")
     
@@ -80,31 +79,49 @@ def run_openai(model: str, system_prompt: str, user_prompt: str, input_text: str
     return completion.choices[0].message.content or ""
 
 # --- Grok Service ---
-def run_grok(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, **kwargs) -> str:
+def run_grok(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
     api_key = st.session_state.get("xai_api_key")
     if not api_key: raise ProviderError("XAI (Grok) API Key is not set. Please provide it in the sidebar.")
     if not Client: raise ProviderError("xai-sdk is not installed.")
+    if images: st.warning("Grok provider does not support images in this app. Ignoring.")
 
     client = Client(api_key=api_key)
     chat = client.chat.create(model=model)
     if system_prompt: chat.append(grok_system(system_prompt))
     chat.append(grok_user(user_prompt.replace("{{input}}", input_text)))
     
-    # Note: Grok's sample() might not support all parameters like OpenAI/Gemini
     response = chat.sample(max_len=max_tokens, temp=temperature)
     return getattr(response, "content", "") or ""
 
-# --- Model Router ---
-def run_agent_step(**kwargs) -> str:
-    provider = kwargs.get("provider")
+# --- Model Router (THE FIX IS HERE) ---
+def run_agent_step(agent_config: dict, input_text: str, images: Optional[List[Any]]) -> str:
+    """
+    Filters arguments from the agent config and calls the correct provider function.
+    """
+    provider = agent_config.get("provider")
+
+    # Prepare a clean dictionary of arguments for the provider functions
+    provider_args = {
+        "model": agent_config.get("model"),
+        "system_prompt": agent_config.get("system_prompt", ""),
+        "user_prompt": agent_config.get("user_prompt", "{{input}}"),
+        "input_text": input_text,
+        "temperature": float(agent_config.get("temperature", 0.5)),
+        "max_tokens": int(agent_config.get("max_tokens", 2048)),
+        "images": images
+    }
+
     try:
-        if provider == "gemini": return run_gemini(**kwargs)
-        elif provider == "openai": return run_openai(**kwargs)
+        if provider == "gemini":
+            return run_gemini(**provider_args)
+        elif provider == "openai":
+            return run_openai(**provider_args)
         elif provider == "grok":
-            if kwargs.get("images"): st.warning("Grok provider does not support images in this app. Ignoring.")
-            return run_grok(**kwargs)
-        else: raise ProviderError(f"Unknown provider: {provider}")
+            return run_grok(**provider_args)
+        else:
+            raise ProviderError(f"Unknown provider: {provider}")
     except Exception as e:
+        # Catch and re-raise as a standard ProviderError for consistent handling
         raise ProviderError(str(e))
 
 
@@ -167,7 +184,7 @@ def get_theme_css(theme_name):
     return f"""<style> .badge {{padding:2px 8px;border-radius:8px;font-size:12px;display:inline-block;margin-right:6px;}} .badge-ok {{background:#e6ffe6;color:#1a7f37;border:1px solid #1a7f37;}} .badge-err {{background:#ffe6e6;color:#a12622;border:1px solid #a12622;}} .status-dot {{height:10px;width:10px;border-radius:50%;display:inline-block;margin-right:6px;}} .dot-green {{background:#00c853;}} .dot-yellow {{background:#ffd600;}} .dot-red {{background:#d50000;}} .panel {{padding:10px 12px;border:1px solid #ccc;border-radius:8px;background:{sec_bg};}} .stApp {{background-color:{bg};}} h1,h2,h3,p,label,div[data-baseweb="tooltip"],div[data-testid="stMarkdownContainer"] p {{color:{text} !important;}} .stButton>button {{background-color:{primary};color:white !important;border:1px solid {primary};}} div[data-testid="stSidebarUserContent"] {{background-color:{sec_bg};}}</style>"""
 
 # --- State Init ---
-DEFAULT_AGENTS = yaml.safe_load("""- {name: Summarizer, provider: gemini, model: gemini-2.5-flash, temperature: 0.3, max_tokens: 1024, system_prompt: 'Summarize accurately.', user_prompt: 'Summarize in 3 bullets:\\n\\n{{input}}'}""")
+DEFAULT_AGENTS = yaml.safe_load("""- {name: Summarizer, provider: gemini, model: gemini-1.5-flash, temperature: 0.3, max_tokens: 1024, system_prompt: 'Summarize accurately.', user_prompt: 'Summarize in 3 bullets:\\n\\n{{input}}'}""")
 if "agents" not in ss: ss.agents = DEFAULT_AGENTS
 for key in ["dataset", "schema", "generated_docs", "pipeline_history", "images"]:
     if key not in ss: ss[key] = []
@@ -182,7 +199,6 @@ with st.sidebar:
     st.divider()
 
     st.caption("API Keys")
-    # Helper to manage API keys
     def api_key_manager(env_var, ss_key, label):
         if env_var in os.environ:
             ss[ss_key] = os.environ[env_var]
@@ -194,15 +210,14 @@ with st.sidebar:
                 ss[ss_key] = key_input
                 st.rerun()
         return badge
-
     c1, c2, c3 = st.columns(3)
-    c1.markdown(api_key_manager("GEMINI_API_KEY", "GEMINI_API_KEY", "Gemini"), unsafe_allow_html=True)
+    c1.markdown(api_key_manager("GOOGLE_API_KEY", "google_api_key", "Gemini"), unsafe_allow_html=True)
     c2.markdown(api_key_manager("OPENAI_API_KEY", "openai_api_key", "OpenAI"), unsafe_allow_html=True)
     c3.markdown(api_key_manager("XAI_API_KEY", "xai_api_key", "Grok"), unsafe_allow_html=True)
     st.divider()
 
     st.caption("Global Overrides")
-    ALL_MODELS = ["None", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gpt-4.1-mini", "gpt-4o-mini", "grok-4-fast-reasoning", "grok-3-mini"]
+    ALL_MODELS = ["None", "gemini-1.5-flash", "gemini-1.5-pro", "gpt-4o", "gpt-4o-mini", "llama3-70b-8192", "llama3-8b-8192"]
     prov = st.selectbox("Provider override", ["None", "gemini", "openai", "grok"])
     mod = st.selectbox("Model override", ALL_MODELS)
     ss.global_provider_override = prov if prov != "None" else None
@@ -270,7 +285,7 @@ with tab4:
     if c1.button("➕ Add Agent"): ss.agents.append(DEFAULT_AGENTS[0]); st.rerun()
     if c2.button("🔄 Reset"): ss.agents = DEFAULT_AGENTS; st.rerun()
 
-with tab5:
+with tab5: # Pipeline execution with the bug fix
     input_text = st.text_area("Pipeline Input", ss.generated_docs[0]['content'] if ss.generated_docs else "", height=250)
     if st.button("Run Pipeline", type="primary", disabled=(ss.is_running or not ss.agents)):
         ss.is_running, ss.pipeline_history = True, []
@@ -283,7 +298,8 @@ with tab5:
             status.markdown(f"<span class='status-dot dot-yellow'></span> Running {i}/{len(ss.agents)}: **{agent_copy['name']}**", unsafe_allow_html=True)
             progress.progress(i/len(ss.agents))
             try:
-                output = run_agent_step(**agent_copy, input_text=current_text, images=ss.images)
+                # This is the corrected function call
+                output = run_agent_step(agent_config=agent_copy, input_text=current_text, images=ss.images)
                 ss.pipeline_history.append({"agent": agent_copy['name'], "input": current_text, "output": output, "error": None})
                 current_text = output
             except ProviderError as e:
