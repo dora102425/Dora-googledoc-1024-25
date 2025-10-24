@@ -38,7 +38,7 @@ except ImportError:
 class ProviderError(Exception):
     pass
 
-# --- Gemini Service ---
+# --- Gemini Service (FIXED with robust safety handling) ---
 def run_gemini(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
     api_key = st.session_state.get("google_api_key")
     if not api_key: raise ProviderError("Google API Key is not set. Please provide it in the sidebar.")
@@ -51,19 +51,27 @@ def run_gemini(model: str, system_prompt: str, user_prompt: str, input_text: str
     parts = [full_prompt]
     if images:
         for f in images:
-            # Ensure we are at the start of the file before reading
             f.seek(0)
             parts.append(Image.open(io.BytesIO(f.read())))
 
     m = genai.GenerativeModel(model)
-    # Safety settings can sometimes block valid content, so we set them to block only high probability
-    safety = [{"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-              {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-              {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-              {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"}]
-              
-    resp = m.generate_content(parts, generation_config={"temperature": temperature, "max_output_tokens": max_tokens}, safety_settings=safety)
-    return resp.text if hasattr(resp, 'text') else "Error: No text returned from Gemini (possible safety block)."
+    resp = m.generate_content(parts, generation_config={"temperature": temperature, "max_output_tokens": max_tokens})
+
+    # --- THIS IS THE FIX ---
+    # Robustly check for content and handle safety blocks instead of crashing.
+    try:
+        return resp.text
+    except ValueError:
+        # Check if the response was blocked due to safety settings.
+        if resp.prompt_feedback and resp.prompt_feedback.block_reason:
+            reason = resp.prompt_feedback.block_reason.name
+            return f"Error: The input prompt was blocked by Gemini's safety filter due to: {reason}. Please modify your input."
+        if resp.candidates and resp.candidates[0].finish_reason.name == "SAFETY":
+            return "Error: The response from Gemini was blocked due to safety filters. The model's output may have been flagged as harmful content. Try a different input or prompt."
+        # If it's another kind of empty response, provide a generic error.
+        return "Error: Gemini returned an empty response. The model may have had an issue generating content for this input."
+    # --- END OF FIX ---
+
 
 # --- OpenAI Service ---
 def run_openai(model: str, system_prompt: str, user_prompt: str, input_text: str, temperature: float, max_tokens: int, images: Optional[List[Any]] = None) -> str:
@@ -102,15 +110,11 @@ def run_grok(model: str, system_prompt: str, user_prompt: str, input_text: str, 
 
 # --- Model Router ---
 def run_agent_step(agent_config: dict, input_text: str, images: Optional[List[Any]]) -> str:
-    """Filters args and calls the correct provider, preventing 'unexpected keyword' errors."""
     provider = agent_config.get("provider")
     args = {
-        "model": agent_config.get("model"),
-        "system_prompt": agent_config.get("system_prompt", ""),
-        "user_prompt": agent_config.get("user_prompt", "{{input}}"),
-        "input_text": input_text,
-        "temperature": float(agent_config.get("temperature", 0.5)),
-        "max_tokens": int(agent_config.get("max_tokens", 2048)),
+        "model": agent_config.get("model"), "system_prompt": agent_config.get("system_prompt", ""),
+        "user_prompt": agent_config.get("user_prompt", "{{input}}"), "input_text": input_text,
+        "temperature": float(agent_config.get("temperature", 0.5)), "max_tokens": int(agent_config.get("max_tokens", 2048)),
         "images": images
     }
     try:
@@ -120,6 +124,7 @@ def run_agent_step(agent_config: dict, input_text: str, images: Optional[List[An
         else: raise ProviderError(f"Unknown provider: {provider}")
     except Exception as e:
         raise ProviderError(f"{provider} error: {str(e)}")
+
 
 # ==============================================================================
 # --- UTILS ---
@@ -146,8 +151,7 @@ def render_template(template: str, record: Dict[str, Any]) -> str:
 def export_docx(text: str) -> io.BytesIO:
     doc, buf = Document(), io.BytesIO()
     for line in str(text).splitlines(): doc.add_paragraph(line)
-    doc.save(buf)
-    buf.seek(0)
+    doc.save(buf); buf.seek(0)
     return buf
 
 def build_zip(docs: List[Dict[str,str]], ext: str) -> bytes:
@@ -174,7 +178,7 @@ def get_theme_css(theme_name):
     return f"""<style>.badge{{padding:2px 8px;border-radius:8px;font-size:12px;display:inline-block;margin-right:6px}}.badge-ok{{background:#e6ffe6;color:#1a7f37;border:1px solid #1a7f37}}.badge-err{{background:#ffe6e6;color:#a12622;border:1px solid #a12622}}.status-dot{{height:10px;width:10px;border-radius:50%;display:inline-block;margin-right:6px}}.dot-green{{background:#00c853}}.dot-yellow{{background:#ffd600}}.dot-red{{background:#d50000}}.panel{{padding:10px 12px;border:1px solid #ccc;border-radius:8px;background:{sbg}}}.stApp{{background-color:{bg}}}h1,h2,h3,p,label,div[data-baseweb="tooltip"],div[data-testid="stMarkdownContainer"] p{{color:{txt} !important}}.stButton>button{{background-color:{p};color:white !important;border:1px solid {p}}}div[data-testid="stSidebarUserContent"]{{background-color:{sbg}}}</style>"""
 
 # --- INIT STATE ---
-DEFAULT_AGENTS = [{"name":"Summarizer","provider":"gemini","model":"gemini-2.5-flash","temperature":0.3,"max_tokens":1024,"system_prompt":"Summarize accurately.","user_prompt":"Summarize in 3 bullets:\n\n{{input}}"}]
+DEFAULT_AGENTS = [{"name":"Summarizer","provider":"gemini","model":"gemini-1.5-flash","temperature":0.3,"max_tokens":1024,"system_prompt":"Summarize accurately.","user_prompt":"Summarize in 3 bullets:\n\n{{input}}"}]
 for k,v in {"dataset":[],"schema":[],"generated_docs":[],"pipeline_history":[],"images":[],"template_text":"", "is_running":False,"selected_theme":"Flora (Default)","pipeline_input":""}.items():
     if k not in ss: ss[k] = v
 if "agents" not in ss: ss.agents = DEFAULT_AGENTS
@@ -199,7 +203,7 @@ with st.sidebar:
     st.divider()
     ss.global_provider_override = st.selectbox("Provider Override", ["None","gemini","openai","grok"])
     if ss.global_provider_override == "None": ss.global_provider_override = None
-    ss.global_model_override = st.selectbox("Model Override", ["None","gemini-2.5-flash","gemini-2.5-flash-lite","gpt-4.1-mini","gpt-4o-mini","grok-3-mini"])
+    ss.global_model_override = st.selectbox("Model Override", ["None","gemini-1.5-flash","gemini-1.5-pro","gpt-4o","gpt-4o-mini","llama3-70b-8192"])
     if ss.global_model_override == "None": ss.global_model_override = None
     st.divider()
     yf = st.file_uploader("Load agents.yaml", type=["yaml","yml"])
@@ -246,23 +250,23 @@ with tab4:
             c1,c2,c3 = st.columns(3)
             a["name"] = c1.text_input("Name", a.get("name"), key=f"an{i}")
             a["provider"] = c2.selectbox("Provider", ["gemini","openai","grok"], ["gemini","openai","grok"].index(a.get("provider","gemini")), key=f"ap{i}")
-            a["model"] = c3.text_input("Model", a.get("model","gemini-2.5-flash"), key=f"am{i}")
+            a["model"] = c3.text_input("Model", a.get("model","gemini-1.5-flash"), key=f"am{i}")
             a["system_prompt"] = st.text_area("System Prompt", a.get("system_prompt",""), key=f"asp{i}", height=100)
             a["user_prompt"] = st.text_area("User Prompt", a.get("user_prompt","{{input}}"), key=f"aup{i}", height=150)
-    if st.button("➕ Add Agent"): ss.agents.append(DEFAULT_AGENTS[0].copy()); st.rerun()
-    if st.button("🔄 Reset"): ss.agents = DEFAULT_AGENTS.copy(); st.rerun()
+    c1, c2 = st.columns(2)
+    if c1.button("➕ Add Agent"): ss.agents.append(DEFAULT_AGENTS[0].copy()); st.rerun()
+    if c2.button("🔄 Reset Agents"): ss.agents = DEFAULT_AGENTS.copy(); st.rerun()
 
 with tab5:
     st.subheader("Execute Pipeline")
-    # FIXED: Explicit document loading to ensure input is not empty
     if ss.generated_docs:
         c1, c2 = st.columns([3, 1])
-        sel_idx = c1.selectbox("Load Doc into Pipeline", range(len(ss.generated_docs)), format_func=lambda i: f"Doc {i+1}: {ss.generated_docs[i]['filename']}")
-        if c2.button("Load Doc"):
+        sel_idx = c1.selectbox("Load a generated document into the pipeline", range(len(ss.generated_docs)), format_func=lambda i: f"Doc {i+1}: {ss.generated_docs[i]['filename']}")
+        if c2.button("Load Doc", key="load_doc_btn"):
             ss.pipeline_input = ss.generated_docs[sel_idx]["content"]
             st.rerun()
-
-    st.text_area("Pipeline Input", key="pipeline_input", height=250)
+    
+    st.text_area("Pipeline Input Text", key="pipeline_input", height=250)
     
     if st.button("Run Pipeline", type="primary", disabled=(ss.is_running or not ss.agents or not ss.pipeline_input)):
         ss.is_running, ss.pipeline_history = True, []
@@ -272,7 +276,7 @@ with tab5:
             ac = agent.copy()
             if ss.global_provider_override: ac["provider"] = ss.global_provider_override
             if ss.global_model_override: ac["model"] = ss.global_model_override
-            stat.markdown(f"Running {i}/{len(ss.agents)}: **{ac['name']}**")
+            stat.markdown(f"<span class='status-dot dot-yellow'></span> Running {i}/{len(ss.agents)}: **{ac['name']}**", unsafe_allow_html=True)
             prog.progress(i/len(ss.agents))
             try:
                 out = run_agent_step(ac, curr, ss.images)
@@ -281,22 +285,24 @@ with tab5:
             except Exception as e:
                 ss.pipeline_history.append({"agent":ac['name'], "input":curr, "output":None, "error":str(e)})
                 st.error(e); break
-        stat.success("Done!"); ss.is_running = False
+        stat.success("Pipeline finished!"); ss.is_running = False
 
     if ss.pipeline_history:
         for i, step in enumerate(ss.pipeline_history):
             with st.expander(f"Step {i+1}: {step['agent']}", expanded=bool(step["error"])):
+                st.text_area("Input to this step", step["input"], height=150, disabled=True, key=f"in_{i}")
                 if step["error"]: st.error(step["error"])
-                else: st.text_area("Output", step["output"], height=150, key=f"o{i}")
+                else: st.text_area("Output from this step", step["output"], height=150, disabled=True, key=f"o{i}")
 
 with tab6:
-    if not ss.generated_docs: st.info("No docs.")
+    if not ss.generated_docs: st.info("No documents to export.")
     else:
-        fmt = st.selectbox("Format", ["txt","md","docx","zip-txt","zip-md","zip-docx"])
-        if "zip" in fmt and st.button("Build ZIP"):
-            st.download_button("Download ZIP", build_zip(ss.generated_docs, fmt.split("-")[1]), "docs.zip")
-        elif "zip" not in fmt:
-            idx = st.number_input("Doc Index", 1, len(ss.generated_docs), 1)-1
+        fmt = st.selectbox("Export Format", ["txt","md","docx","zip-txt","zip-md","zip-docx"])
+        if "zip" in fmt:
+            if st.button("Build ZIP", type="primary"):
+                st.download_button("Download ZIP", build_zip(ss.generated_docs, fmt.split("-")[1]), f"docs_{int(time.time())}.zip")
+        else:
+            idx = st.number_input("Document Index to Download", 1, len(ss.generated_docs), 1)-1
             d = ss.generated_docs[idx]
             data = export_docx(d["content"]) if fmt=="docx" else d["content"].encode("utf-8")
-            st.download_button(f"Download .{fmt}", data, f"{os.path.splitext(d['filename'])[0]}.{fmt}")
+            st.download_button(f"Download .{fmt.upper()}", data, f"{os.path.splitext(d['filename'])[0]}.{fmt}")
