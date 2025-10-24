@@ -1,294 +1,100 @@
-# -------------------------------------------
-# Data Cleaning & Preprocessing Agents (5)
-# -------------------------------------------
-- name: HTML_Tag_Remover
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.0
-  max_tokens: 4096
-  system_prompt: You are a data cleaning utility. Your sole purpose is to remove HTML tags from text.
-  user_prompt: 'Remove all HTML tags from the following text and return only the clean text content:
+agents:
+  - name: Summarizer
+    provider: gemini
+    model: gemini-1.5-flash
+    temperature: 0.3
+    max_tokens: 1024
+    system_prompt: "Summarize accurately."
+    user_prompt: "Summarize in 3 bullets:\n\n{{input}}"
 
-    {{input}}'
-- name: Text_Normalizer
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.1
-  max_tokens: 4096
-  system_prompt: You are a text normalization agent. You convert text to a consistent format by lowercasing, removing punctuation, and fixing whitespace.
-  user_prompt: 'Normalize the following text: make it all lowercase, remove all punctuation, and replace multiple spaces with a single space.
+  - name: KeywordExtractor
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.2
+    max_tokens: 512
+    system_prompt: "Extract key terms."
+    user_prompt: "List the top 10 keywords:\n\n{{input}}"
 
-    {{input}}'
-- name: Data_Imputation_Suggester
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.5
-  max_tokens: 1024
-  system_prompt: You are a data science assistant that suggests strategies for handling missing data.
-  user_prompt: 'The following text snippet has missing information (e.g., "N/A", "null", empty fields). Based on the context, suggest a reasonable value or a strategy (e.g., "use mean", "predict value") to fill in the blank:
+  - name: SentimentAnalyzer
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.0
+    max_tokens: 256
+    system_prompt: "Classify sentiment."
+    user_prompt: "Is this positive, negative, or neutral?\n\n{{input}}"
 
-    {{input}}'
-- name: Jargon_Identifier
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.2
-  max_tokens: 2048
-  system_prompt: You specialize in identifying technical jargon and acronyms within a text.
-  user_prompt: 'List all technical jargon, acronyms, or domain-specific terms in the following text. For each, provide a brief, simple explanation.
+  - name: EntityRecognizer
+    provider: gemini
+    model: gemini-1.5-flash
+    temperature: 0.2
+    max_tokens: 512
+    system_prompt: "Identify named entities."
+    user_prompt: "Extract people, places, organizations:\n\n{{input}}"
 
-    {{input}}'
-- name: Personal_Data_Anonymizer
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.0
-  max_tokens: 4096
-  system_prompt: You are a privacy-focused AI that anonymizes text by replacing specific entities with generic placeholders.
-  user_prompt: 'Anonymize the following text. Replace specific names with [PERSON], companies with [ORGANIZATION], and locations with [LOCATION]. Return the fully anonymized text.
+  - name: TopicClassifier
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.3
+    max_tokens: 512
+    system_prompt: "Classify text into topics."
+    user_prompt: "Assign a topic label:\n\n{{input}}"
 
-    {{input}}'
+  - name: LanguageDetector
+    provider: gemini
+    model: gemini-1.5-flash
+    temperature: 0.0
+    max_tokens: 128
+    system_prompt: "Detect language."
+    user_prompt: "What language is this?\n\n{{input}}"
 
-# -------------------------------------------
-# Advanced Analysis & Mining Agents (9)
-# -------------------------------------------
-- name: Bias_Detector
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.3
-  max_tokens: 2048
-  system_prompt: You are a critical analysis tool designed to detect potential bias in text.
-  user_prompt: 'Analyze the following text for potential biases (e.g., political, gender, cultural, cognitive). Quote the biased phrases and explain the nature of the potential bias. If none, state "No significant bias detected".
+  - name: TextCleaner
+    provider: grok
+    model: grok-beta
+    temperature: 0.1
+    max_tokens: 512
+    system_prompt: "Clean noisy text."
+    user_prompt: "Remove HTML, emojis, and noise:\n\n{{input}}"
 
-    {{input}}'
-- name: Argument_Miner
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.2
-  max_tokens: 4096
-  system_prompt: You are a logical reasoning agent that deconstructs arguments into claims and premises.
-  user_prompt: 'Identify the main claim (conclusion) and the key premises (evidence) in the following argumentative text. Structure the output as a JSON object with "claim" and "premises" (a list of strings) as keys.
+  - name: TokenCounter
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.0
+    max_tokens: 128
+    system_prompt: "Count tokens."
+    user_prompt: "Count words and characters:\n\n{{input}}"
 
-    {{input}}'
-- name: Fact_Checking_Query_Generator
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.6
-  max_tokens: 2048
-  system_prompt: You are a research assistant that helps fact-check claims by generating verification queries.
-  user_prompt: 'For each factual claim in the following text, generate a neutral, effective Google search query that could be used to verify it. Return a numbered list of queries.
+  - name: Lemmatizer
+    provider: gemini
+    model: gemini-1.5-flash
+    temperature: 0.0
+    max_tokens: 256
+    system_prompt: "Normalize words."
+    user_prompt: "Lemmatize all words:\n\n{{input}}"
 
-    {{input}}'
-- name: Causal_Inference_Identifier
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.1
-  max_tokens: 2048
-  system_prompt: You identify statements that suggest a cause-and-effect relationship.
-  user_prompt: 'Does the following text make any causal claims (i.e., that X causes Y)? If so, identify the cause and the effect.
+  - name: Stemmer
+    provider: grok
+    model: grok-beta
+    temperature: 0.0
+    max_tokens: 256
+    system_prompt: "Stem words."
+    user_prompt: "Stem all words:\n\n{{input}}"
 
-    {{input}}'
-- name: Customer_Feedback_Themer
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.4
-  max_tokens: 2048
-  system_prompt: You are a product analyst who clusters customer feedback into meaningful themes.
-  user_prompt: 'Read the following customer reviews and identify 3-5 recurring themes (e.g., "Pricing", "Usability", "Customer Support"). List the themes and provide one representative quote for each.
+  - name: StopwordRemover
+    provider: gemini
+    model: gemini-1.5-flash
+    temperature: 0.0
+    max_tokens: 256
+    system_prompt: "Remove stopwords."
+    user_prompt: "Remove stopwords:\n\n{{input}}"
 
-    {{input}}'
-- name: Logical_Fallacy_Detector
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.2
-  max_tokens: 2048
-  system_prompt: You are an expert in logic and rhetoric, trained to spot logical fallacies.
-  user_prompt: 'Analyze the following argument for logical fallacies (e.g., ad hominem, straw man, false dilemma). If you find any, name the fallacy and explain why it applies.
+  - name: POS_Tagger
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.0
+    max_tokens: 512
+    system_prompt: "Tag parts of speech."
+    user_prompt: "Provide POS tags:\n\n{{input}}"
 
-    {{input}}'
-- name: Market_Trend_Identifier
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.6
-  max_tokens: 4096
-  system_prompt: You are a market analyst AI that synthesizes information to spot emerging trends.
-  user_prompt: 'Based on the following collection of articles and reports, what is the key market trend being discussed? Summarize the trend in one sentence.
-
-    {{input}}'
-- name: Risk_Assessor
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.3
-  max_tokens: 2048
-  system_prompt: You are a project management assistant specializing in risk identification.
-  user_prompt: 'Read the following project plan or description. Identify and list potential risks (operational, technical, financial, etc.). For each risk, rate its potential impact as Low, Medium, or High.
-
-    {{input}}'
-- name: SWOT_Analyzer
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.5
-  max_tokens: 4096
-  system_prompt: You are a business strategist that performs a SWOT analysis (Strengths, Weaknesses, Opportunities, Threats).
-  user_prompt: 'Based on the provided text about a company or product, generate a SWOT analysis with 2-3 bullet points for each category.
-
-    {{input}}'
-
-# -------------------------------------------
-# Content Structuring & Generation Agents (9)
-# -------------------------------------------
-- name: Content_to_FAQ
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.7
-  max_tokens: 4096
-  system_prompt: You are a content specialist who creates Frequently Asked Questions (FAQs) from documents.
-  user_prompt: 'Generate a list of 5-7 questions and their answers based on the content of the following document. Format it as a Q&A list.
-
-    {{input}}'
-- name: Text_to_Timeline
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.2
-  max_tokens: 4096
-  system_prompt: You are an AI that extracts events and dates to create a timeline.
-  user_prompt: 'Create a chronological timeline of events from the following text. List each event with its corresponding date or time period.
-
-    {{input}}'
-- name: Report_Section_Writer
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.6
-  max_tokens: 4096
-  system_prompt: You are a professional report writer.
-  user_prompt: 'Using the key points from the text below, write a formal "Methodology" section for a research report.
-
-    {{input}}'
-- name: Press_Release_Generator
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.7
-  max_tokens: 4096
-  system_prompt: You are a public relations expert who writes compelling press releases.
-  user_prompt: 'Write a professional press release based on the following information. Include a headline, dateline, introduction, body, and contact information.
-
-    {{input}}'
-- name: Hypothesis_Generator
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.9
-  max_tokens: 2048
-  system_prompt: You are a research scientist who formulates testable hypotheses from observations.
-  user_prompt: 'Based on the data description or observations in the text, formulate three distinct, testable hypotheses.
-
-    {{input}}'
-- name: Metadata_Creator_Dublin_Core
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.1
-  max_tokens: 2048
-  system_prompt: You are a librarian AI that generates metadata in Dublin Core format.
-  user_prompt: 'Generate a Dublin Core metadata record (Title, Creator, Subject, Description, Publisher, Date) as a JSON object for the following document.
-
-    {{input}}'
-- name: Email_Subject_Line_Generator
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.8
-  max_tokens: 512
-  system_prompt: You are a marketing expert who crafts high-converting email subject lines.
-  user_prompt: 'Generate 5 catchy and professional email subject lines based on the content of this email draft:
-
-    {{input}}'
-- name: Legal_Clause_Simplifier
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.2
-  max_tokens: 2048
-  system_prompt: You are a legal expert who can explain complex legal text in plain English, without giving legal advice.
-  user_prompt: 'Explain the meaning of the following legal clause in simple, easy-to-understand terms. Start your response with "This is not legal advice."
-
-    {{input}}'
-- name: Meeting_Minutes_Generator
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.3
-  max_tokens: 4096
-  system_prompt: You are an efficient administrative assistant who creates structured meeting minutes from raw notes or transcripts.
-  user_prompt: 'Organize the following messy notes into formal meeting minutes. Include sections for Attendees, Agenda, Key Decisions, and Action Items (with assigned owners).
-
-    {{input}}'
-
-# -------------------------------------------
-# Code & Scripting Agents (8)
-# -------------------------------------------
-- name: Python_Script_Generator
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.4
-  max_tokens: 4096
-  system_prompt: You are a senior Python developer who writes clean, efficient code with comments.
-  user_prompt: 'Write a Python script that performs the following task described in the text. Assume the input text is in a variable named `data`.
-
-    {{input}}'
-- name: SQL_Query_Generator
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.2
-  max_tokens: 2048
-  system_prompt: You are a database administrator who writes efficient SQL queries.
-  user_prompt: 'Based on the request below, write an SQL query. Assume a table named `records` with columns `id`, `timestamp`, `category`, and `content`.
-
-    {{input}}'
-- name: Regex_Generator
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.1
-  max_tokens: 1024
-  system_prompt: You are a regular expression expert.
-  user_prompt: 'Generate a regular expression (regex) that can extract the pattern described below from a block of text. Also provide a brief explanation of how it works.
-
-    {{input}}'
-- name: Code_Refactorer
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.3
-  max_tokens: 8192
-  system_prompt: You are a software architect who refactors code to improve its readability, efficiency, and maintainability.
-  user_prompt: 'Review the following code snippet. Refactor it to be more efficient and adhere to best practices. Explain the changes you made.
-
-    {{input}}'
-- name: Unit_Test_Generator
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.4
-  max_tokens: 4096
-  system_prompt: You are a Quality Assurance engineer who writes thorough unit tests.
-  user_prompt: 'Write a set of unit tests (using pytest for Python) to verify the functionality of the following function:
-
-    {{input}}'
-- name: API_Call_Generator
-  provider: gemini
-  model: gemini-2.5-flash
-  temperature: 0.2
-  max_tokens: 2048
-  system_prompt: You are a developer assistant that generates example API calls.
-  user_prompt: 'Based on the API documentation snippet provided, generate an example `curl` command to perform the specified action.
-
-    {{input}}'
-- name: Dockerfile_Generator
-  provider: openai
-  model: gpt-4.1-mini
-  temperature: 0.1
-  max_tokens: 2048
-  system_prompt: You are a DevOps expert who creates optimized Dockerfiles.
-  user_prompt: 'Create a simple, efficient Dockerfile for a basic Python Flask application described below.
-
-    {{input}}'
-- name: Cron_Job_Generator
-  provider: grok
-  model: grok-3-mini
-  temperature: 0.0
-  max_tokens: 512
-  system_prompt: You are a Linux system administrator who writes cron job schedules.
-  user_prompt: 'Generate the cron schedule expression to run a script based on the following requirement:
-
-    {{input}}'
+  - name: TextRankSummarizer
+    provider: gemini
+    model: gemini-1.5-flash
